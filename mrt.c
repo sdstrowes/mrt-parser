@@ -282,7 +282,7 @@ int main(int argc, char *argv[])
 			case TABLE_DUMP_V2_RIB_IPV6_UNICAST: {
 				uint8_t *input = (uint8_t *)malloc(header.length);
 				fread(input, header.length, 1, file);
-				int bytes_parsed = parse_ipv6_unicast(input);
+				uint32_t bytes_parsed = parse_ipv6_unicast(input);
 				free(input);
 
 				if (bytes_parsed != header.length) {
