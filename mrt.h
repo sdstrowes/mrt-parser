@@ -92,5 +92,12 @@ struct attr_as_path_header
 	uint8_t count;
 } __attribute__((packed));
 
+void print_hex(void *, int, int);
+void print_help(char *);
+
+int parse_bgp_path_attr_aspath(uint8_t *, int);
+int parse_entry(uint8_t *);
+int parse_ipv6_unicast(uint8_t *);
+
 #endif
 
