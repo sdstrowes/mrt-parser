@@ -286,7 +286,7 @@ int main(int argc, char *argv[])
 				free(input);
 
 				if (bytes_parsed != header.length) {
-					printf("Error: parsed %lu bytes from a header length %lu\n",
+					printf("Error: parsed %u bytes from a header length %u\n",
 						bytes_parsed, header.length);
 					exit(EXIT_FAILURE);
 				}
@@ -308,5 +308,7 @@ int main(int argc, char *argv[])
 		}
 	}
 	fclose(file);
+
+	return EXIT_SUCCESS;
 }
 
