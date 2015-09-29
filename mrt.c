@@ -180,7 +180,7 @@ int parse_entry(uint8_t *input)
             ....       |    Entry Count                |
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_ipv6_unicast(uint8_t *input)
+int parse_ipvN_unicast(uint8_t *input, int family)
 {
 	int index = 0;
 
@@ -200,13 +200,22 @@ int parse_ipv6_unicast(uint8_t *input)
 	int tmp = pfx_len;
 	while (tmp > 0) {num_bytes++; tmp-=8;}
 
-	struct sockaddr_in6 addr;
-	memset(&addr, 0, sizeof(struct sockaddr_in6));
-	memcpy(&addr.sin6_addr, input+index, num_bytes);
-	index += num_bytes;
+	if (family == TABLE_DUMP_V2_RIB_IPV6_UNICAST) {
+		struct sockaddr_in6 addr;
+		memset(&addr, 0, sizeof(struct sockaddr_in6));
+		memcpy(&addr.sin6_addr, input+index, num_bytes);
+		memset(out_str, 0, INET6_ADDRSTRLEN);
+		inet_ntop(AF_INET6, &addr.sin6_addr, out_str, INET6_ADDRSTRLEN);
+	}
+	else if (family == TABLE_DUMP_V2_RIB_IPV4_UNICAST) {
+		struct sockaddr_in addr;
+		memset(&addr, 0, sizeof(struct sockaddr_in));
+		memcpy(&addr.sin_addr, input+index, num_bytes);
+		memset(out_str, 0, INET_ADDRSTRLEN);
+		inet_ntop(AF_INET, &addr.sin_addr, out_str, INET_ADDRSTRLEN);
+	}
 
-	memset(out_str, 0, INET_ADDRSTRLEN);
-	inet_ntop(AF_INET6, &addr.sin6_addr, out_str, INET6_ADDRSTRLEN);
+	index += num_bytes;
 
 	memcpy(&entries_count, input+index, sizeof(entries_count));
 	entries_count = ntohs(entries_count);
@@ -279,10 +288,11 @@ int main(int argc, char *argv[])
 		switch (header.type) {
 		case MRT_TABLE_DUMP_V2: {
 			switch (header.subtype) {
+			case TABLE_DUMP_V2_RIB_IPV4_UNICAST:
 			case TABLE_DUMP_V2_RIB_IPV6_UNICAST: {
 				uint8_t *input = (uint8_t *)malloc(header.length);
 				fread(input, header.length, 1, file);
-				uint32_t bytes_parsed = parse_ipv6_unicast(input);
+				uint32_t bytes_parsed = parse_ipvN_unicast(input, header.subtype);
 				free(input);
 
 				if (bytes_parsed != header.length) {
