@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zlib.h>
 
 #include "mrt.h"
 
@@ -239,9 +240,10 @@ void print_help(char *name)
 	printf("	-h		: Print this help then exit.\n");
 }
 
+
 int main(int argc, char *argv[])
 {
-	FILE *file = NULL;
+	gzFile file;
 	debug = false;
 
 	int opt;
@@ -253,7 +255,7 @@ int main(int argc, char *argv[])
 			break;
 		}
 		case 'f': {
-			file = fopen(optarg, "r");
+			file = gzopen(optarg, "r");
 			if (file == NULL) {
 				fprintf(stderr, "Could not open file; error: %s\n", strerror(errno));
 				exit(EXIT_FAILURE);
@@ -269,7 +271,7 @@ int main(int argc, char *argv[])
 	}
 
 	struct mrt_header header;
-	while (fread(&header, sizeof(struct mrt_header), 1, file) == 1) {
+	while (gzread(file, &header, sizeof(struct mrt_header)) == sizeof(struct mrt_header)) {
 		header.ts      = ntohl(header.ts);
 		header.type    = ntohs(header.type);
 		header.subtype = ntohs(header.subtype);
@@ -291,7 +293,7 @@ int main(int argc, char *argv[])
 			case TABLE_DUMP_V2_RIB_IPV4_UNICAST:
 			case TABLE_DUMP_V2_RIB_IPV6_UNICAST: {
 				uint8_t *input = (uint8_t *)malloc(header.length);
-				fread(input, header.length, 1, file);
+				gzread(file, input, header.length);
 				uint32_t bytes_parsed = parse_ipvN_unicast(input, header.subtype);
 				free(input);
 
@@ -307,7 +309,7 @@ int main(int argc, char *argv[])
 				if (debug) {
 					printf("Unhandled subtype %u\n", header.subtype);
 				}
-				fseek(file, header.length, SEEK_CUR);
+				gzseek(file, header.length, SEEK_CUR);
 			}
 			}
 			break;
@@ -317,7 +319,7 @@ int main(int argc, char *argv[])
 		}
 		}
 	}
-	fclose(file);
+	gzclose(file);
 
 	return EXIT_SUCCESS;
 }
