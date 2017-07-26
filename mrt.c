@@ -28,6 +28,126 @@ void print_hex(void *in, int start, int end)
 }
 
 /*
+rfc4760
+        +---------------------------------------------------------+
+        | Address Family Identifier (2 octets)                    |
+        +---------------------------------------------------------+
+        | Subsequent Address Family Identifier (1 octet)          |
+        +---------------------------------------------------------+
+        | Length of Next Hop Network Address (1 octet)            |
+        +---------------------------------------------------------+
+        | Network Address of Next Hop (variable)                  |
+        +---------------------------------------------------------+
+        | Reserved (1 octet)                                      |
+        +---------------------------------------------------------+
+        | Network Layer Reachability Information (variable)       |
+        +---------------------------------------------------------+
+*/
+int parse_bgp_path_attr_mp_reach_nlri(uint8_t *input, int len)
+{
+	int index = 0;
+	struct attr_mp_reach_nlri header;
+	memcpy(&header, input+index, sizeof(header));
+	header.afi = htons(header.afi);
+
+	index += sizeof(header);
+
+	if (debug) {
+		printf("\n--- BGP PATH ATTR MP REACH NLRI (len:%u/%u) ---\n", len, header.nh_len);
+		//print_hex(input, 0, sizeof(header)+64);
+		print_hex(&header, 0, sizeof(header));
+		printf(" afi :%u\n", header.afi);
+		printf(" safi:%u\n", header.safi);
+		printf(" len (next hop):%u\n", header.nh_len);
+	}
+
+	struct sockaddr_storage addr;
+	switch (header.afi) {
+	case 1: {
+		//index += sizeof(struct in_addr);
+		index += header.nh_len;
+		break;
+	}
+	case 2: {
+		char addr_str[INET6_ADDRSTRLEN];
+		struct in6_addr *addr = (struct in6_addr *)input+index;
+		inet_ntop(AF_INET6, input+index, addr_str, INET6_ADDRSTRLEN);
+		index += header.nh_len;
+
+		break;
+	}
+	default: {
+		fprintf(stdout, "Unknown AF type in NLRI information: %u\n", header.afi);
+		return index;
+	}
+	}
+
+	// reserved octet
+	//printf("[%3u] DEBUG: Skipping reserved octect at pos %u\n", index, index);
+	index += 1;
+
+	while (index < len) {
+		uint8_t nlri_len;
+		memcpy(&nlri_len, input+index, 1);
+		index += 1;
+
+		if (debug) {
+			printf("--- NLRI ---\n");
+			printf(" nlri_len:%u\n",      nlri_len);
+		}
+
+		if (nlri_len == 0) {
+			continue;
+		}
+
+		switch (header.afi) {
+		case 1: {
+			char addr_str[INET_ADDRSTRLEN];
+			struct in_addr *addr = (struct in_addr *)input+index;
+			inet_ntop(AF_INET, input+index, addr_str, INET_ADDRSTRLEN);
+
+			printf("[%3u] NLRI pfx: %s/%u\n", index, addr_str, nlri_len);
+
+			int16_t len = 0, i = nlri_len;
+			while (i > 0) {
+				printf("i: %u, len: %u\n", i, len);
+				len++; i-=8;
+			}
+
+			index += len;
+			break;
+		}
+		case 2: {
+			char addr_str[INET6_ADDRSTRLEN];
+			struct in6_addr *addr = (struct in6_addr *)input+index;
+			inet_ntop(AF_INET6, input+index, addr_str, INET6_ADDRSTRLEN);
+
+			printf("|%s/%u", addr_str, nlri_len);
+
+			int16_t len = 0, i = nlri_len;
+			while (i > 0) {
+				len++; i-=8;
+			}
+
+			index += len;
+			break;
+		}
+		default: {
+			fprintf(stdout, "[%3u] Unknown AF type in NLRI information: %u\n", index, header.afi);
+			return index;
+		}
+		}
+	}
+
+	return index;
+}
+
+int parse_bgp_path_attr_nexthop(uint8_t *input, int len)
+{
+	return len;
+}
+
+/*
    1 byte type, 1 byte count; V2 ASNs are 4 bytes; N of these entries up
    to 'len' bytes in the attribute
        0                   1                   2                   3
@@ -39,6 +159,7 @@ void print_hex(void *in, int start, int end)
 int parse_bgp_path_attr_aspath(uint8_t *input, int len)
 {
 	int index = 0;
+	printf("|");
 	while (index < len) {
 		struct attr_as_path_header header;
 		memcpy(&header, input+index, sizeof(header));
@@ -77,7 +198,6 @@ int parse_bgp_path_attr_aspath(uint8_t *input, int len)
 			}
 		}
 	}
-	printf("\n");
 	return index;
 }
 
@@ -109,7 +229,7 @@ int parse_entry(uint8_t *input)
 		print_hex(&header, 0, sizeof(header));
 		printf(" peer_index:%u\n", header.peer_idx);
 		printf(" orig_ts: %u\n",   header.orig_ts);
-		printf(" attr_len: %u\n",  header.attr_len);
+		printf(" attr_len: %u + %u\n", sizeof(header), header.attr_len);
 	}
 
 	/* parse BGP attributes */
@@ -147,6 +267,24 @@ int parse_entry(uint8_t *input)
 			}
 			break;
 		}
+		case BGP_PATH_ATTR_NEXTHOP: {
+			int rc = parse_bgp_path_attr_nexthop(input+index, attr_header.len);
+			if (rc != attr_header.len) {
+				fprintf(stderr, "NEXTHOP attribute incorrect length: parsed %u, expected %u\n",
+					rc, attr_header.len);
+			}
+			break;
+		}
+		case BGP_PATH_ATTR_MP_REACH_NLRI: {
+			int rc = parse_bgp_path_attr_mp_reach_nlri(input+index, attr_header.len);
+			if (rc != attr_header.len) {
+				printf("MP_REACH_NLRI attribute incorrect length: parsed %u, expected %u\n",
+					rc, attr_header.len);
+				fprintf(stderr, "MP_REACH_NLRI attribute incorrect length: parsed %u, expected %u\n",
+					rc, attr_header.len);
+			}
+			break;
+		}
 		default: {
 			if (debug) {
 				printf("Skipping type %u\n", attr_header.code);
@@ -156,6 +294,8 @@ int parse_entry(uint8_t *input)
 
 		index += attr_header.len;
 	}
+
+	printf("\n");
 
 	if (index != sizeof(header) + header.attr_len) {
 		printf("Warning: bad length detected in IPv6 unicast entry: %u != %u\n",
@@ -307,7 +447,7 @@ int main(int argc, char *argv[])
 			}
 			default: {
 				if (debug) {
-					printf("Unhandled subtype %u\n", header.subtype);
+					fprintf(stderr, "Unhandled subtype %u\n", header.subtype);
 				}
 				gzseek(file, header.length, SEEK_CUR);
 			}
@@ -315,7 +455,9 @@ int main(int argc, char *argv[])
 			break;
 		}
 		default: {
-			printf("Unhandled type %u\n", header.subtype);
+			if (debug) {
+				fprintf(stderr, "Unhandled type %u\n", header.subtype);
+			}
 		}
 		}
 	}

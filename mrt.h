@@ -58,6 +58,8 @@ From RFC 6396, Appendix A:
 #define BGP_PATH_ATTR_LOCALPREF  5
 #define BGP_PATH_ATTR_ATOM_AGG   6
 #define BGP_PATH_ATTR_AGGREGATOR 7
+// rfc4760, page 3
+#define BGP_PATH_ATTR_MP_REACH_NLRI 14
 
 // RFC 4271, page 17
 #define ASPATH_AS_SET 1
@@ -91,6 +93,20 @@ struct attr_as_path_header
 	uint8_t type;
 	uint8_t count;
 } __attribute__((packed));
+
+struct attr_mp_reach_afi_safi
+{
+	uint16_t afi;
+	uint8_t  safi;
+
+} __attribute__((packed));
+struct attr_mp_reach_nlri
+{
+	uint16_t afi;
+	uint8_t  safi;
+	uint8_t  nh_len;
+} __attribute__((packed));
+
 
 void print_hex(void *, int, int);
 void print_help(char *);
