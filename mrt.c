@@ -259,6 +259,12 @@ int parse_entry(uint8_t *input)
 		}
 
 		switch (attr_header.code) {
+		case BGP_PATH_ATTR_ORIGIN: {
+			if (debug) {
+				printf("Skipping PATH_ATTR_ORIGIN type (%u)\n", attr_header.code);
+			}
+			break;
+		}
 		case BGP_PATH_ATTR_ASPATH: {
 			int rc = parse_bgp_path_attr_aspath(input+index, attr_header.len);
 			if (rc != attr_header.len) {
@@ -272,6 +278,36 @@ int parse_entry(uint8_t *input)
 			if (rc != attr_header.len) {
 				fprintf(stderr, "NEXTHOP attribute incorrect length: parsed %u, expected %u\n",
 					rc, attr_header.len);
+			}
+			break;
+		}
+		case BGP_PATH_ATTR_EXITDISC: {
+			if (debug) {
+				printf("Skipping PATH_ATTR_EXIT_DISC type (%u)\n", attr_header.code);
+			}
+			break;
+		}
+		case BGP_PATH_ATTR_LOCALPREF: {
+			if (debug) {
+				printf("Skipping PATH_ATTR_LOCALPREF type (%u)\n", attr_header.code);
+			}
+			break;
+		}
+		case BGP_PATH_ATTR_ATOM_AGG: {
+			if (debug) {
+				printf("Skipping PATH_ATTR_ATOM_AGG type (%u)\n", attr_header.code);
+			}
+			break;
+		}
+		case BGP_PATH_ATTR_AGGREGATOR: {
+			if (debug) {
+				printf("Skipping PATH_ATTR_AGGREGATOR type (%u)\n", attr_header.code);
+			}
+			break;
+		}
+		case BGP_PATH_ATTR_COMMUNITY: {
+			if (debug) {
+				printf("Skipping PATH_ATTR_COMMUNITY type (%u)\n", attr_header.code);
 			}
 			break;
 		}
