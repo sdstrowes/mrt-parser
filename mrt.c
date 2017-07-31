@@ -142,6 +142,30 @@ int parse_bgp_path_attr_mp_reach_nlri(uint8_t *input, int len)
 	return index;
 }
 
+int parse_bgp_path_attr_community(uint8_t *input, int len)
+{
+	printf("|", len);
+	if (len % 4 != 0) {
+		fprintf(stderr, "Malformed community of length %u\n", len);
+	}
+
+	int idx = 0;
+	while (idx < len) {
+		if (idx != 0) {
+			printf(" ");
+		}
+		uint16_t a;
+		a = (uint16_t *)(input+idx);
+		idx += 2;
+		uint16_t b;
+		b = (uint16_t *)(input+idx);
+		idx += 2;
+
+		printf("%4x:%4x",a,b);
+	}
+	return len;
+}
+
 int parse_bgp_path_attr_nexthop(uint8_t *input, int len)
 {
 	return len;
@@ -306,8 +330,10 @@ int parse_entry(uint8_t *input)
 			break;
 		}
 		case BGP_PATH_ATTR_COMMUNITY: {
-			if (debug) {
-				printf("Skipping PATH_ATTR_COMMUNITY type (%u)\n", attr_header.code);
+			int rc = parse_bgp_path_attr_community(input+index, attr_header.len);
+			if (rc != attr_header.len) {
+				fprintf(stderr, "COMMUNITY attribute incorrect length: parsed %u, expected %u\n",
+					rc, attr_header.len);
 			}
 			break;
 		}
