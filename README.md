@@ -12,14 +12,22 @@ bgpdump](https://bitbucket.org/ripencc/bgpdump/wiki/Home) does a lot more
 string formatting for output):
 
 ```
-sds@stkilda:~/proj/mrt-parser$ time ./mrt -f rib.20150929.0000.v4 > /dev/null
+sds@stkilda:~/proj/mrt-parser$ time zcat bview.20170801.0800.gz > /dev/null
 
-real    0m16.768s
-user    0m16.325s
-sys     0m0.436s
-sds@stkilda:~/proj/mrt-parser$ time ~/ext/bgpdump/bgpdump -M rib.20150929.0000.v4 > /dev/null 2>&1 
+real	0m3.288s
+user	0m3.252s
+sys	0m0.020s
 
-real    1m51.894s
-user    1m30.514s
-sys     0m21.269s
+
+sds@stkilda:~/proj/mrt-parser$ time ./mrt  -f bview.20170801.0800.gz > /dev/null
+
+real	0m23.587s
+user	0m23.313s
+sys	0m0.120s
+
+sds@stkilda:~/proj/mrt-parser$ time ~/ext/bgpdump/bgpdump -m bview.20170801.0800.gz > /dev/null 2>&1
+
+real	1m40.063s
+user	1m30.846s
+sys	0m8.477s
 ```
