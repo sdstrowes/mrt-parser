@@ -18,7 +18,6 @@ real	0m3.288s
 user	0m3.252s
 sys	0m0.020s
 
-
 sds@stkilda:~/proj/mrt-parser$ time ./mrt  -f bview.20170801.0800.gz > /dev/null
 
 real	0m23.587s
