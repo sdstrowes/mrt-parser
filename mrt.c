@@ -45,7 +45,7 @@ rfc4760
         | Network Layer Reachability Information (variable)       |
         +---------------------------------------------------------+
 */
-int parse_bgp_path_attr_mp_reach_nlri(char *buffer, uint8_t *input, int len)
+int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *input, int len)
 {
 	int index = 0;
 	struct attr_mp_reach_nlri header;
@@ -86,6 +86,9 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, uint8_t *input, int len)
 	//printf("[%3u] DEBUG: Skipping reserved octect at pos %u\n", index, index);
 	index += 1;
 
+	char *buffer_idx = buffer;
+	int remaining    = buffer_len;
+
 	while (index < len) {
 		uint8_t nlri_len;
 		memcpy(&nlri_len, input+index, 1);
@@ -106,7 +109,10 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, uint8_t *input, int len)
 			struct in_addr *addr = (struct in_addr *)input+index;
 			inet_ntop(AF_INET, input+index, addr_str, INET_ADDRSTRLEN);
 
-			sprintf(buffer + strlen(buffer), "%s/%u", addr_str, nlri_len);
+			int n = snprintf(buffer_idx, remaining, "%s/%u", addr_str, nlri_len);
+			buffer_idx += n;
+			remaining  -= n;
+
 
 			int16_t len = 0, i = nlri_len;
 			while (i > 0) {
@@ -121,7 +127,9 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, uint8_t *input, int len)
 			struct in6_addr *addr = (struct in6_addr *)input+index;
 			inet_ntop(AF_INET6, input+index, addr_str, INET6_ADDRSTRLEN);
 
-			sprintf(buffer + strlen(buffer), "%s/%u", addr_str, nlri_len);
+			int n = snprintf(buffer_idx, remaining, "%s/%u", addr_str, nlri_len);
+			buffer_idx += n;
+			remaining  -= n;
 
 			int16_t len = 0, i = nlri_len;
 			while (i > 0) {
@@ -141,31 +149,36 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, uint8_t *input, int len)
 	return index;
 }
 
-int parse_bgp_path_attr_community(char *buffer, uint8_t *input, int len)
+int parse_bgp_path_attr_community(char *buffer, int buffer_len, uint8_t *input, int len)
 {
 	if (len % 4 != 0) {
 		fprintf(stderr, "Malformed community of length %u\n", len);
 	}
 
 	int idx = 0;
-	int buffer_idx = 0;
+	char *buffer_idx = buffer;
+	int remaining = buffer_len;
 	while (idx < len) {
 		if (idx != 0) {
-			buffer_idx += sprintf(buffer + buffer_idx, " ");
+			int n = snprintf(buffer_idx, remaining, " ");
+			buffer_idx += n;
+			remaining  -= n;
 		}
 		uint16_t a;
-		a = (uint16_t *)(input+idx);
+		a = *((uint16_t *)(input+idx));
 		idx += 2;
 		uint16_t b;
-		b = (uint16_t *)(input+idx);
+		b = *((uint16_t *)(input+idx));
 		idx += 2;
 
-		buffer_idx += sprintf(buffer + buffer_idx, "%04x:%04x", a, b);
+		int n = snprintf(buffer_idx, remaining, "%04x:%04x", a, b);
+		buffer_idx += n;
+		remaining  -= n;
 	}
 	return len;
 }
 
-int parse_bgp_path_attr_nexthop(char *buffer, uint8_t *input, int len)
+int parse_bgp_path_attr_nexthop(char *buffer, int remaining, uint8_t *input, int len)
 {
 	return len;
 }
@@ -179,14 +192,15 @@ int parse_bgp_path_attr_nexthop(char *buffer, uint8_t *input, int len)
       |    type == ASPATH_AS_SE[TQ]   |    Count = num ASNs           |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_bgp_path_attr_aspath(char *buffer, uint8_t *input, int len)
+int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int len)
 {
-	int index = 0;
-	int buffer_idx = 0;
-	while (index < len) {
+	int idx = 0;
+	char *buffer_idx = buffer;
+
+	while (idx < len) {
 		struct attr_as_path_header header;
-		memcpy(&header, input+index, sizeof(header));
-		index += sizeof(header);
+		memcpy(&header, input+idx, sizeof(header));
+		idx += sizeof(header);
 
 		if (debug) {
 			printf("\n--- BGP PATH ATTR AS PATH ---\n");
@@ -199,33 +213,46 @@ int parse_bgp_path_attr_aspath(char *buffer, uint8_t *input, int len)
 		int counter = 0;
 		if (header.type ==  ASPATH_AS_SET) {
 			while (counter < header.count) {
-				memcpy(&asn, input+index, sizeof(asn));
+				memcpy(&asn, input+idx, sizeof(asn));
 				if (counter == 0) {
-					buffer_idx += sprintf(buffer + buffer_idx, " {");
+					int n = snprintf(buffer_idx, remaining, " {");
+					buffer_idx += n;
+					remaining  -= n;
 				}
 				else {
-					buffer_idx += sprintf(buffer + buffer_idx, ",");
+					int n = snprintf(buffer_idx, remaining, ",");
+					buffer_idx += n;
+					remaining  -= n;
 				}
-				buffer_idx += sprintf(buffer + buffer_idx, "%u", htonl(asn));
-				index += sizeof(asn);
+				int n = snprintf(buffer_idx, remaining, "%u", htonl(asn));
+				buffer_idx += n;
+				remaining  -= n;
+				idx += sizeof(asn);
 				counter++;
 			}
-			buffer_idx += sprintf(buffer + buffer_idx, "}");
+			int n = snprintf(buffer_idx, remaining, "}");
+			buffer_idx += n;
+			remaining  -= n;
 		}
 		else if (header.type == ASPATH_AS_SEQ) {
 			while (counter < header.count) {
-				memcpy(&asn, input+index, sizeof(asn));
+				memcpy(&asn, input+idx, sizeof(asn));
 				if (counter != 0) {
-					buffer_idx += sprintf(buffer + buffer_idx, " ");
+					int n = snprintf(buffer_idx, remaining, " ");
+					buffer_idx += n;
+					remaining  -= n;
 				}
-				buffer_idx += sprintf(buffer + buffer_idx, "%u", htonl(asn));
-				index += sizeof(asn);
+				int n = snprintf(buffer_idx, remaining, "%u", htonl(asn));
+				buffer_idx += n;
+				remaining  -= n;
+				idx += sizeof(asn);
 				counter++;
 			}
 		}
 	}
-	return index;
+	return idx;
 }
+
 
 /*
    2 bytes, 4 bytes, 2 bytes:
@@ -254,7 +281,7 @@ int parse_entry(uint8_t *input)
 		print_hex(&header, 0, sizeof(header));
 		printf(" peer_index:%u\n", header.peer_idx);
 		printf(" orig_ts: %u\n",   header.orig_ts);
-		printf(" attr_len: %u + %u\n", sizeof(header), header.attr_len);
+		printf(" attr_len: %lu + %u\n", sizeof(header), header.attr_len);
 	}
 
 
@@ -266,11 +293,13 @@ int parse_entry(uint8_t *input)
 			BGP_PATH_ATTR_COMMUNITY_MASK |
 			BGP_PATH_ATTR_MP_REACH_NLRI_MASK;
 
-	char aspath_buffer[262144];
+	int buf_len = 262144;
+
+	char aspath_buffer[buf_len];
 	aspath_buffer[0] = '\0';
-	char nexthop_buffer[262144];
+	char nexthop_buffer[buf_len];
 	nexthop_buffer[0] = '\0';
-	char communities_buffer[262144];
+	char communities_buffer[buf_len];
 	communities_buffer[0] = '\0';
 
 
@@ -311,7 +340,7 @@ int parse_entry(uint8_t *input)
 		case BGP_PATH_ATTR_ASPATH: {
 		/* Columnar output needs to be consistent; if we expect a column in the
 		 * mask but it's not present in the data, add columns */
-			int rc = parse_bgp_path_attr_aspath(aspath_buffer, input+index, attr_header.len);
+			int rc = parse_bgp_path_attr_aspath(aspath_buffer, buf_len, input+index, attr_header.len);
 			if (rc != attr_header.len) {
 				fprintf(stderr, "AS_PATH attribute incorrect length: parsed %u, expected %u\n",
 					rc, attr_header.len);
@@ -319,7 +348,7 @@ int parse_entry(uint8_t *input)
 			break;
 		}
 		case BGP_PATH_ATTR_NEXTHOP: {
-			int rc = parse_bgp_path_attr_nexthop(nexthop_buffer, input+index, attr_header.len);
+			int rc = parse_bgp_path_attr_nexthop(nexthop_buffer, buf_len, input+index, attr_header.len);
 			if (rc != attr_header.len) {
 				fprintf(stderr, "NEXTHOP attribute incorrect length: parsed %u, expected %u\n",
 					rc, attr_header.len);
@@ -351,7 +380,7 @@ int parse_entry(uint8_t *input)
 			break;
 		}
 		case BGP_PATH_ATTR_COMMUNITY: {
-			int rc = parse_bgp_path_attr_community(communities_buffer, input+index, attr_header.len);
+			int rc = parse_bgp_path_attr_community(communities_buffer, buf_len, input+index, attr_header.len);
 			if (rc != attr_header.len) {
 				fprintf(stderr, "COMMUNITY attribute incorrect length: parsed %u, expected %u\n",
 					rc, attr_header.len);
