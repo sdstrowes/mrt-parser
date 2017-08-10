@@ -43,7 +43,7 @@ rfc4760
         | Network Layer Reachability Information (variable)       |
         +---------------------------------------------------------+
 */
-int parse_bgp_path_attr_mp_reach_nlri(uint8_t *input, int len)
+int parse_bgp_path_attr_mp_reach_nlri(char *buffer, uint8_t *input, int len)
 {
 	int index = 0;
 	struct attr_mp_reach_nlri header;
@@ -54,7 +54,6 @@ int parse_bgp_path_attr_mp_reach_nlri(uint8_t *input, int len)
 
 	if (debug) {
 		printf("\n--- BGP PATH ATTR MP REACH NLRI (len:%u/%u) ---\n", len, header.nh_len);
-		//print_hex(input, 0, sizeof(header)+64);
 		print_hex(&header, 0, sizeof(header));
 		printf(" afi :%u\n", header.afi);
 		printf(" safi:%u\n", header.safi);
@@ -64,7 +63,6 @@ int parse_bgp_path_attr_mp_reach_nlri(uint8_t *input, int len)
 	struct sockaddr_storage addr;
 	switch (header.afi) {
 	case 1: {
-		//index += sizeof(struct in_addr);
 		index += header.nh_len;
 		break;
 	}
@@ -106,7 +104,7 @@ int parse_bgp_path_attr_mp_reach_nlri(uint8_t *input, int len)
 			struct in_addr *addr = (struct in_addr *)input+index;
 			inet_ntop(AF_INET, input+index, addr_str, INET_ADDRSTRLEN);
 
-			printf("%s/%u", addr_str, nlri_len);
+			sprintf(buffer + strlen(buffer), "%s/%u", addr_str, nlri_len);
 
 			int16_t len = 0, i = nlri_len;
 			while (i > 0) {
@@ -121,7 +119,7 @@ int parse_bgp_path_attr_mp_reach_nlri(uint8_t *input, int len)
 			struct in6_addr *addr = (struct in6_addr *)input+index;
 			inet_ntop(AF_INET6, input+index, addr_str, INET6_ADDRSTRLEN);
 
-			printf("%s/%u", addr_str, nlri_len);
+			sprintf(buffer + strlen(buffer), "%s/%u", addr_str, nlri_len);
 
 			int16_t len = 0, i = nlri_len;
 			while (i > 0) {
@@ -141,16 +139,17 @@ int parse_bgp_path_attr_mp_reach_nlri(uint8_t *input, int len)
 	return index;
 }
 
-int parse_bgp_path_attr_community(uint8_t *input, int len)
+int parse_bgp_path_attr_community(char *buffer, uint8_t *input, int len)
 {
 	if (len % 4 != 0) {
 		fprintf(stderr, "Malformed community of length %u\n", len);
 	}
 
 	int idx = 0;
+	int buffer_idx = 0;
 	while (idx < len) {
 		if (idx != 0) {
-			printf(" ");
+			buffer_idx += sprintf(buffer + buffer_idx, " ");
 		}
 		uint16_t a;
 		a = (uint16_t *)(input+idx);
@@ -159,12 +158,12 @@ int parse_bgp_path_attr_community(uint8_t *input, int len)
 		b = (uint16_t *)(input+idx);
 		idx += 2;
 
-		printf("%04x:%04x",a,b);
+		buffer_idx += sprintf(buffer + buffer_idx, "%04x:%04x", a, b);
 	}
 	return len;
 }
 
-int parse_bgp_path_attr_nexthop(uint8_t *input, int len)
+int parse_bgp_path_attr_nexthop(char *buffer, uint8_t *input, int len)
 {
 	return len;
 }
@@ -178,9 +177,10 @@ int parse_bgp_path_attr_nexthop(uint8_t *input, int len)
       |    type == ASPATH_AS_SE[TQ]   |    Count = num ASNs           |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_bgp_path_attr_aspath(uint8_t *input, int len)
+int parse_bgp_path_attr_aspath(char *buffer, uint8_t *input, int len)
 {
 	int index = 0;
+	int buffer_idx = 0;
 	while (index < len) {
 		struct attr_as_path_header header;
 		memcpy(&header, input+index, sizeof(header));
@@ -199,94 +199,30 @@ int parse_bgp_path_attr_aspath(uint8_t *input, int len)
 			while (counter < header.count) {
 				memcpy(&asn, input+index, sizeof(asn));
 				if (counter == 0) {
-					printf(" {");
+					buffer_idx += sprintf(buffer + buffer_idx, " {");
 				}
 				else {
-					printf(",");
+					buffer_idx += sprintf(buffer + buffer_idx, ",");
 				}
-				printf("%u", htonl(asn));
+				buffer_idx += sprintf(buffer + buffer_idx, "%u", htonl(asn));
 				index += sizeof(asn);
 				counter++;
 			}
-			printf("}");
+			buffer_idx += sprintf(buffer + buffer_idx, "}");
 		}
 		else if (header.type == ASPATH_AS_SEQ) {
 			while (counter < header.count) {
 				memcpy(&asn, input+index, sizeof(asn));
 				if (counter != 0) {
-					printf(" ");
+					buffer_idx += sprintf(buffer + buffer_idx, " ");
 				}
-				printf("%u", htonl(asn));
+				buffer_idx += sprintf(buffer + buffer_idx, "%u", htonl(asn));
 				index += sizeof(asn);
 				counter++;
 			}
 		}
 	}
 	return index;
-}
-
-void pad_output(uint16_t *mask, uint16_t code)
-{
-	/* This will break if these header codes aren't discovered
-	 * sequentially!
-	 * (but the files I've tested appear to be this way, so this
-	 * works for now.) */
-	if (*mask) {
-		if ((BGP_PATH_ATTR_ORIGIN_MASK <= code) && (*mask & BGP_PATH_ATTR_ORIGIN_MASK) ) {
-			printf("|");
-			*mask -= BGP_PATH_ATTR_ORIGIN_MASK;
-		}
-		if ((BGP_PATH_ATTR_ASPATH_MASK <= code) && (*mask & BGP_PATH_ATTR_ASPATH_MASK) ) {
-			printf("|");
-			*mask -= BGP_PATH_ATTR_ASPATH_MASK;
-		}
-		if ((BGP_PATH_ATTR_NEXTHOP_MASK <= code) && (*mask & BGP_PATH_ATTR_NEXTHOP_MASK) ) {
-			printf("|");
-			*mask -= BGP_PATH_ATTR_NEXTHOP_MASK;
-		}
-		if ((BGP_PATH_ATTR_EXITDISC_MASK <= code) && (*mask & BGP_PATH_ATTR_EXITDISC_MASK) ) {
-			printf("|");
-			*mask -= BGP_PATH_ATTR_EXITDISC_MASK;
-		}
-		if ((BGP_PATH_ATTR_COMMUNITY_MASK <= code) && (*mask & BGP_PATH_ATTR_COMMUNITY_MASK) ) {
-			printf("|");
-			*mask -= BGP_PATH_ATTR_COMMUNITY_MASK;
-		}
-		if ((BGP_PATH_ATTR_MP_REACH_NLRI_MASK <= code) && (*mask & BGP_PATH_ATTR_MP_REACH_NLRI_MASK) ) {
-			printf("|");
-			*mask -= BGP_PATH_ATTR_MP_REACH_NLRI_MASK;
-		}
-	}
-}
-
-void pad_end_output(uint16_t *mask)
-{
-	if (*mask) {
-		if (*mask & BGP_PATH_ATTR_ORIGIN_MASK) {
-			printf("|");
-			*mask -= BGP_PATH_ATTR_ORIGIN_MASK;
-		}
-		if (*mask & BGP_PATH_ATTR_ASPATH_MASK) {
-			printf("|");
-			*mask -= BGP_PATH_ATTR_ASPATH_MASK;
-		}
-		if (*mask & BGP_PATH_ATTR_NEXTHOP_MASK) {
-			printf("|");
-			*mask -= BGP_PATH_ATTR_NEXTHOP_MASK;
-		}
-		if (*mask & BGP_PATH_ATTR_EXITDISC_MASK) {
-			printf("|");
-			*mask -= BGP_PATH_ATTR_EXITDISC_MASK;
-		}
-		if (*mask & BGP_PATH_ATTR_COMMUNITY_MASK) {
-			printf("|");
-			*mask -= BGP_PATH_ATTR_COMMUNITY_MASK;
-		}
-		if (*mask & BGP_PATH_ATTR_MP_REACH_NLRI_MASK) {
-			printf("|");
-			*mask -= BGP_PATH_ATTR_MP_REACH_NLRI_MASK;
-		}
-	}
 }
 
 /*
@@ -328,6 +264,14 @@ int parse_entry(uint8_t *input)
 			BGP_PATH_ATTR_COMMUNITY_MASK |
 			BGP_PATH_ATTR_MP_REACH_NLRI_MASK;
 
+	char aspath_buffer[262144];
+	aspath_buffer[0] = '\0';
+	char nexthop_buffer[262144];
+	nexthop_buffer[0] = '\0';
+	char communities_buffer[262144];
+	communities_buffer[0] = '\0';
+
+
 	/* parse BGP attributes */
 	while (index < sizeof(header) + header.attr_len) {
 		struct bgp_attr_header attr_header;
@@ -365,8 +309,7 @@ int parse_entry(uint8_t *input)
 		case BGP_PATH_ATTR_ASPATH: {
 		/* Columnar output needs to be consistent; if we expect a column in the
 		 * mask but it's not present in the data, add columns */
-			pad_output(&mask, BGP_PATH_ATTR_ASPATH_MASK);
-			int rc = parse_bgp_path_attr_aspath(input+index, attr_header.len);
+			int rc = parse_bgp_path_attr_aspath(aspath_buffer, input+index, attr_header.len);
 			if (rc != attr_header.len) {
 				fprintf(stderr, "AS_PATH attribute incorrect length: parsed %u, expected %u\n",
 					rc, attr_header.len);
@@ -374,8 +317,7 @@ int parse_entry(uint8_t *input)
 			break;
 		}
 		case BGP_PATH_ATTR_NEXTHOP: {
-			pad_output(&mask, BGP_PATH_ATTR_NEXTHOP_MASK);
-			int rc = parse_bgp_path_attr_nexthop(input+index, attr_header.len);
+			int rc = parse_bgp_path_attr_nexthop(nexthop_buffer, input+index, attr_header.len);
 			if (rc != attr_header.len) {
 				fprintf(stderr, "NEXTHOP attribute incorrect length: parsed %u, expected %u\n",
 					rc, attr_header.len);
@@ -383,36 +325,31 @@ int parse_entry(uint8_t *input)
 			break;
 		}
 		case BGP_PATH_ATTR_EXITDISC: {
-			pad_output(&mask, BGP_PATH_ATTR_EXITDISC_MASK);
 			if (debug) {
 				printf("Skipping PATH_ATTR_EXIT_DISC type (%u)\n", attr_header.code);
 			}
 			break;
 		}
 		case BGP_PATH_ATTR_LOCALPREF: {
-			pad_output(&mask, BGP_PATH_ATTR_LOCALPREF_MASK);
 			if (debug) {
 				printf("Skipping PATH_ATTR_LOCALPREF type (%u)\n", attr_header.code);
 			}
 			break;
 		}
 		case BGP_PATH_ATTR_ATOM_AGG: {
-			pad_output(&mask, BGP_PATH_ATTR_ATOM_AGG_MASK);
 			if (debug) {
 				printf("Skipping PATH_ATTR_ATOM_AGG type (%u)\n", attr_header.code);
 			}
 			break;
 		}
 		case BGP_PATH_ATTR_AGGREGATOR: {
-			pad_output(&mask, BGP_PATH_ATTR_AGGREGATOR_MASK);
 			if (debug) {
 				printf("Skipping PATH_ATTR_AGGREGATOR type (%u)\n", attr_header.code);
 			}
 			break;
 		}
 		case BGP_PATH_ATTR_COMMUNITY: {
-			pad_output(&mask, BGP_PATH_ATTR_COMMUNITY_MASK);
-			int rc = parse_bgp_path_attr_community(input+index, attr_header.len);
+			int rc = parse_bgp_path_attr_community(communities_buffer, input+index, attr_header.len);
 			if (rc != attr_header.len) {
 				fprintf(stderr, "COMMUNITY attribute incorrect length: parsed %u, expected %u\n",
 					rc, attr_header.len);
@@ -420,15 +357,14 @@ int parse_entry(uint8_t *input)
 			break;
 		}
 		case BGP_PATH_ATTR_MP_REACH_NLRI: {
-			pad_output(&mask, BGP_PATH_ATTR_MP_REACH_NLRI_MASK);
-			int rc = parse_bgp_path_attr_mp_reach_nlri(input+index, attr_header.len);
-			if (rc != attr_header.len) {
-				printf("MP_REACH_NLRI attribute incorrect length: parsed %u, expected %u\n",
-					rc, attr_header.len);
-				fprintf(stderr, "MP_REACH_NLRI attribute incorrect length: parsed %u, expected %u\n",
-					rc, attr_header.len);
-			}
-			//mask -= BGP_PATH_ATTR_MP_REACH_NLRI_MASK;
+//			int rc = parse_bgp_path_attr_mp_reach_nlr
+//			if (rc != attr_header.len) {
+//				printf("MP_REACH_NLRI attribute incorrect length: parsed %u, expected %u\n",
+//					rc, attr_header.len);
+//				fprintf(stderr, "MP_REACH_NLRI attribute incorrect length: parsed %u, expected %u\n",
+//					rc, attr_header.len);
+//			}
+//			//mask -= BGP_PATH_ATTR_MP_REACH_NLRI_MASK;
 			break;
 		}
 		default: {
@@ -438,14 +374,10 @@ int parse_entry(uint8_t *input)
 		}
 		}
 
-		//printf("\nCodeLoopEnd: %04x\n", mask);
-
 		index += attr_header.len;
 	}
 
-	pad_end_output(&mask);
-
-	printf("\n");
+	printf("||%s|%s||%s\n", aspath_buffer, nexthop_buffer, communities_buffer);
 
 	if (index != sizeof(header) + header.attr_len) {
 		printf("Warning: bad length detected in IPv6 unicast entry: %u != %u\n",
