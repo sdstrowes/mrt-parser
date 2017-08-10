@@ -210,11 +210,11 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
 		}
 
 		uint32_t asn;
-		int counter = 0;
+		int hop_count = 0;
 		if (header.type ==  ASPATH_AS_SET) {
-			while (counter < header.count) {
+			while (hop_count < header.count) {
 				memcpy(&asn, input+idx, sizeof(asn));
-				if (counter == 0) {
+				if (hop_count == 0) {
 					int n = snprintf(buffer_idx, remaining, " {");
 					buffer_idx += n;
 					remaining  -= n;
@@ -228,16 +228,16 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
 				buffer_idx += n;
 				remaining  -= n;
 				idx += sizeof(asn);
-				counter++;
+				hop_count++;
 			}
 			int n = snprintf(buffer_idx, remaining, "}");
 			buffer_idx += n;
 			remaining  -= n;
 		}
 		else if (header.type == ASPATH_AS_SEQ) {
-			while (counter < header.count) {
+			while (hop_count < header.count) {
 				memcpy(&asn, input+idx, sizeof(asn));
-				if (counter != 0) {
+				if (hop_count != 0) {
 					int n = snprintf(buffer_idx, remaining, " ");
 					buffer_idx += n;
 					remaining  -= n;
@@ -246,7 +246,7 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
 				buffer_idx += n;
 				remaining  -= n;
 				idx += sizeof(asn);
-				counter++;
+				hop_count++;
 			}
 		}
 	}
