@@ -12,6 +12,8 @@
 #include "mrt.h"
 
 static bool debug;
+static bool parsev4;
+static bool parsev6;
 
 void print_hex(void *in, int start, int end)
 {
@@ -466,11 +468,21 @@ void print_help(char *name)
 int main(int argc, char *argv[])
 {
 	gzFile file;
-	debug = false;
+	debug  = false;
+	bool parsev4 = false;
+	bool parsev6 = false;
 
 	int opt;
-	while ((opt = getopt(argc, argv, "df:h")) != -1) {
+	while ((opt = getopt(argc, argv, "46df:h")) != -1) {
 		switch (opt) {
+		case '4': {
+			parsev4 = true;
+			break;
+		}
+		case '6': {
+			parsev6 = true;
+			break;
+		}
 		case 'd': {
 			debug = true;
 			fprintf(stderr, "Enabled debug\n");
@@ -490,6 +502,11 @@ int main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 		}
+	}
+
+	if (!parsev4 && !parsev6) {
+		parsev4 = true;
+		parsev6 = true;
 	}
 
 	struct mrt_header header;
@@ -512,19 +529,40 @@ int main(int argc, char *argv[])
 		switch (header.type) {
 		case MRT_TABLE_DUMP_V2: {
 			switch (header.subtype) {
-			case TABLE_DUMP_V2_RIB_IPV4_UNICAST:
-			case TABLE_DUMP_V2_RIB_IPV6_UNICAST: {
-				uint8_t *input = (uint8_t *)malloc(header.length);
-				gzread(file, input, header.length);
-				uint32_t bytes_parsed = parse_ipvN_unicast(input, header.subtype);
-				free(input);
+			case TABLE_DUMP_V2_RIB_IPV4_UNICAST: {
+				if (parsev4) {
+					uint8_t *input = (uint8_t *)malloc(header.length);
+					gzread(file, input, header.length);
+					uint32_t bytes_parsed = parse_ipvN_unicast(input, header.subtype);
+					free(input);
 
-				if (bytes_parsed != header.length) {
-					printf("Error: parsed %u bytes from a header length %u\n",
-						bytes_parsed, header.length);
-					exit(EXIT_FAILURE);
+					if (bytes_parsed != header.length) {
+						printf("Error: parsed %u bytes from a header length %u\n",
+							bytes_parsed, header.length);
+						exit(EXIT_FAILURE);
+					}
 				}
+				else {
+					gzseek(file, header.length, SEEK_CUR);
+				}
+				break;
+			}
+			case TABLE_DUMP_V2_RIB_IPV6_UNICAST: {
+				if (parsev6) {
+					uint8_t *input = (uint8_t *)malloc(header.length);
+					gzread(file, input, header.length);
+					uint32_t bytes_parsed = parse_ipvN_unicast(input, header.subtype);
+					free(input);
 
+					if (bytes_parsed != header.length) {
+						printf("Error: parsed %u bytes from a header length %u\n",
+							bytes_parsed, header.length);
+						exit(EXIT_FAILURE);
+					}
+				}
+				else {
+					gzseek(file, header.length, SEEK_CUR);
+				}
 				break;
 			}
 			default: {
