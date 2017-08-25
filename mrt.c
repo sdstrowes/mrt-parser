@@ -12,8 +12,6 @@
 #include "mrt.h"
 
 static bool debug;
-static bool parsev4;
-static bool parsev6;
 
 void print_hex(void *in, int start, int end)
 {
@@ -62,7 +60,6 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 		printf(" len (next hop):%u\n", header.nh_len);
 	}
 
-	struct sockaddr_storage addr;
 	switch (header.afi) {
 	case 1: {
 		index += header.nh_len;
@@ -70,7 +67,6 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 	}
 	case 2: {
 		char addr_str[INET6_ADDRSTRLEN];
-		struct in6_addr *addr = (struct in6_addr *)input+index;
 		inet_ntop(AF_INET6, input+index, addr_str, INET6_ADDRSTRLEN);
 		index += header.nh_len;
 
@@ -106,7 +102,6 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 		switch (header.afi) {
 		case 1: {
 			char addr_str[INET_ADDRSTRLEN];
-			struct in_addr *addr = (struct in_addr *)input+index;
 			inet_ntop(AF_INET, input+index, addr_str, INET_ADDRSTRLEN);
 
 			int n = snprintf(buffer_idx, remaining, "%s/%u", addr_str, nlri_len);
@@ -124,7 +119,6 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 		}
 		case 2: {
 			char addr_str[INET6_ADDRSTRLEN];
-			struct in6_addr *addr = (struct in6_addr *)input+index;
 			inet_ntop(AF_INET6, input+index, addr_str, INET6_ADDRSTRLEN);
 
 			int n = snprintf(buffer_idx, remaining, "%s/%u", addr_str, nlri_len);
@@ -160,21 +154,21 @@ int parse_bgp_path_attr_community(char *buffer, int buffer_len, uint8_t *input, 
 	int remaining = buffer_len;
 	while (idx < len) {
 		if (idx != 0) {
-			int n = snprintf(buffer_idx, remaining, " ");
-			buffer_idx += n;
-			remaining  -= n;
+			snprintf(buffer_idx, remaining, " ");
+			buffer_idx ++;
+			remaining  --;
 		}
-		uint16_t a;
-		a = *((uint16_t *)(input+idx));
+		uint16_t *a, *b;
+		a = (uint16_t *)(input+idx);
 		idx += 2;
-		uint16_t b;
-		b = *((uint16_t *)(input+idx));
+		b = (uint16_t *)(input+idx);
 		idx += 2;
 
-		int n = snprintf(buffer_idx, remaining, "%04x:%04x", a, b);
-		buffer_idx += n;
-		remaining  -= n;
+		snprintf(buffer_idx, remaining, "%04x:%04x", *a, *b);
+		buffer_idx += 9;
+		remaining  -= 9;
 	}
+
 	return len;
 }
 
@@ -209,47 +203,49 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
 			printf(" count:%u\n", header.count);
 		}
 
-		uint32_t asn;
+		uint32_t *asn;
 		int hop_count = 0;
+		int n;
 		if (header.type ==  ASPATH_AS_SET) {
 			while (hop_count < header.count) {
-				memcpy(&asn, input+idx, sizeof(asn));
+				asn = (uint32_t *)(input+idx);
 				if (hop_count == 0) {
-					int n = snprintf(buffer_idx, remaining, " {");
-					buffer_idx += n;
-					remaining  -= n;
+					snprintf(buffer_idx, remaining, " {");
+					buffer_idx += 2;
+					remaining  -= 2;
 				}
 				else {
-					int n = snprintf(buffer_idx, remaining, ",");
-					buffer_idx += n;
-					remaining  -= n;
+					snprintf(buffer_idx, remaining, ",");
+					buffer_idx++;
+					remaining--;
 				}
-				int n = snprintf(buffer_idx, remaining, "%u", htonl(asn));
+				n = snprintf(buffer_idx, remaining, "%u", htonl(*asn));
 				buffer_idx += n;
 				remaining  -= n;
-				idx += sizeof(asn);
+				idx += sizeof(uint32_t);
 				hop_count++;
 			}
-			int n = snprintf(buffer_idx, remaining, "}");
-			buffer_idx += n;
-			remaining  -= n;
+			snprintf(buffer_idx, remaining, "}");
+			buffer_idx++;
+			remaining--;
 		}
 		else if (header.type == ASPATH_AS_SEQ) {
 			while (hop_count < header.count) {
-				memcpy(&asn, input+idx, sizeof(asn));
+				asn = (uint32_t *)(input+idx);
 				if (hop_count != 0) {
-					int n = snprintf(buffer_idx, remaining, " ");
-					buffer_idx += n;
-					remaining  -= n;
+					snprintf(buffer_idx, remaining, " ");
+					buffer_idx++;
+					remaining--;
 				}
-				int n = snprintf(buffer_idx, remaining, "%u", htonl(asn));
+				n = snprintf(buffer_idx, remaining, "%u", htonl(*asn));
 				buffer_idx += n;
 				remaining  -= n;
-				idx += sizeof(asn);
+				idx += sizeof(uint32_t);
 				hop_count++;
 			}
 		}
 	}
+
 	return idx;
 }
 
@@ -270,13 +266,14 @@ int parse_entry(uint8_t *input)
 	uint16_t index = 0;
 
 	memcpy(&header, input, sizeof(header));
-	header.peer_idx = htons(header.peer_idx);
-	header.orig_ts  = htonl(header.orig_ts);
 	header.attr_len = htons(header.attr_len);
 
 	index += sizeof(header);
 
 	if (debug) {
+		header.peer_idx = htons(header.peer_idx);
+		header.orig_ts  = htonl(header.orig_ts);
+
 		printf("\n--- TABLE_DUMP_V2 IPv6 UNICAST ENTRY HEADER ---\n");
 		print_hex(&header, 0, sizeof(header));
 		printf(" peer_index:%u\n", header.peer_idx);
@@ -438,14 +435,11 @@ int parse_ipvN_unicast(uint8_t *input, int family)
 {
 	int index = 0;
 
-	uint32_t seq_no;
 	uint8_t  pfx_len;
 	char out_str[INET6_ADDRSTRLEN];
 	uint16_t entries_count;
 
-	memcpy(&seq_no, input, sizeof(seq_no));
-	seq_no = htonl(seq_no);
-	index += sizeof(seq_no);
+	index += sizeof(uint32_t);
 
 	pfx_len = input[index];
 	index += sizeof(pfx_len);
@@ -455,11 +449,9 @@ int parse_ipvN_unicast(uint8_t *input, int family)
 	while (tmp > 0) {num_bytes++; tmp-=8;}
 
 	if (family == TABLE_DUMP_V2_RIB_IPV6_UNICAST) {
-		struct sockaddr_in6 addr;
-		memset(&addr, 0, sizeof(struct sockaddr_in6));
-		memcpy(&addr.sin6_addr, input+index, num_bytes);
-		memset(out_str, 0, INET6_ADDRSTRLEN);
-		inet_ntop(AF_INET6, &addr.sin6_addr, out_str, INET6_ADDRSTRLEN);
+		struct in6_addr *addr;
+		addr = (struct in6_addr *)(input+index);
+		inet_ntop(AF_INET6, addr, out_str, INET6_ADDRSTRLEN);
 	}
 	else if (family == TABLE_DUMP_V2_RIB_IPV4_UNICAST) {
 		struct sockaddr_in addr;
