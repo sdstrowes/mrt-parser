@@ -597,7 +597,7 @@ int main(int argc, char *argv[])
 		}
 		default: {
 			if (debug) {
-				fprintf(stderr, "Unhandled type %u\n", header.subtype);
+				fprintf(stderr, "Unhandled type %u\n", header.type);
 			}
 		}
 		}
