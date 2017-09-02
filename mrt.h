@@ -50,6 +50,14 @@ From RFC 6396, Appendix A:
 #define TABLE_DUMP_V2_RIB_IPV6_MULTICAST  5
 #define TABLE_DUMP_V2_RIB_GENERIC         6
 
+// RFC 6396, section 4.4
+#define BGP4MP_STATE_CHANGE      0
+#define BGP4MP_MESSAGE           1
+#define BGP4MP_MESSAGE_AS4       4
+#define BGP4MP_STATE_CHANGE_AS4  5
+#define BGP4MP_MESSAGE_LOCAL     6
+#define BGP4MP_MESSAGE_AS4_LOCAL 7
+
 // RFC 4271, page 17
 #define BGP_PATH_ATTR_ORIGIN     1
 #define BGP_PATH_ATTR_ASPATH     2
@@ -99,7 +107,6 @@ struct mrt_header
         uint32_t length;
 } __attribute__((packed));
 
-
 struct table_dump_v2_ipv6_unicast_header
 {
 	uint16_t peer_idx;
@@ -126,6 +133,7 @@ struct attr_mp_reach_afi_safi
 	uint8_t  safi;
 
 } __attribute__((packed));
+
 struct attr_mp_reach_nlri
 {
 	uint16_t afi;
@@ -133,6 +141,14 @@ struct attr_mp_reach_nlri
 	uint8_t  nh_len;
 } __attribute__((packed));
 
+
+struct bgp4mp_state_change
+{
+	uint32_t asn;
+	uint32_t local_asn;
+	uint16_t if_idx;
+	uint16_t af;
+} __attribute__((packed));
 
 void print_hex(void *, int, int);
 void print_help(char *);

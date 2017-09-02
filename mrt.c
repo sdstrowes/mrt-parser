@@ -476,6 +476,22 @@ int parse_ipvN_unicast(uint8_t *input, int family)
 	return index;
 }
 
+int parse_bgp4mp_state_change(uint8_t *input, int family)
+{
+	int index = 0;
+
+	struct bgp4mp_state_change header;
+
+	memcpy(&header, input, sizeof(header));
+
+	printf("peer ASN: %u\n", htonl(header.asn));
+	printf("local ASN: %u\n", htonl(header.local_asn));
+	printf("interface ID: %u\n", htons(header.if_idx));
+	printf("AF: %u\n", htons(header.af));
+
+	return index;
+}
+
 void print_help(char *name)
 {
 	printf("%s: ploughs through MRT files\n", basename(name));
@@ -594,6 +610,43 @@ int main(int argc, char *argv[])
 			}
 			}
 			break;
+		}
+		case MRT_BGP4MP: {
+			case BGP4MP_STATE_CHANGE: {
+				printf("LOOKS OK 1\n");
+				uint8_t *input = (uint8_t *)malloc(header.length);
+				gzread(file, input, header.length);
+				uint32_t bytes_parsed = parse_bgp4mp_state_change(input, header.subtype);
+				free(input);
+				//gzseek(file, header.length, SEEK_CUR);
+				break;
+			}
+			case BGP4MP_MESSAGE: {
+				printf("LOOKS OK 2\n");
+				gzseek(file, header.length, SEEK_CUR);
+				break;
+			}
+			case BGP4MP_MESSAGE_AS4: {
+				printf("LOOKS OK 3\n");
+				gzseek(file, header.length, SEEK_CUR);
+				break;
+			}
+			case BGP4MP_STATE_CHANGE_AS4: {
+				printf("LOOKS OK 4\n");
+				gzseek(file, header.length, SEEK_CUR);
+				break;
+			}
+			case BGP4MP_MESSAGE_LOCAL: {
+				printf("LOOKS OK 5\n");
+				gzseek(file, header.length, SEEK_CUR);
+				break;
+			}
+			case BGP4MP_MESSAGE_AS4_LOCAL: {
+				printf("LOOKS OK 6\n");
+				gzseek(file, header.length, SEEK_CUR);
+				break;
+			}
+
 		}
 		default: {
 			if (debug) {
