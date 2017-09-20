@@ -142,6 +142,7 @@ struct attr_mp_reach_nlri
 } __attribute__((packed));
 
 
+// RFC 6396, section 4.4
 struct bgp4mp_state_change
 {
 	uint32_t asn;
@@ -149,6 +150,51 @@ struct bgp4mp_state_change
 	uint16_t if_idx;
 	uint16_t af;
 } __attribute__((packed));
+
+struct bgp4mp_state_change_v6
+{
+	uint32_t asn;
+	uint32_t local_asn;
+	uint16_t if_idx;
+	uint16_t af;
+	struct   in6_addr peer_ip;
+	struct   in6_addr local_ip;
+	uint16_t old_state;
+	uint16_t new_state;
+} __attribute__((packed));
+
+struct bgp4mp_state_change_v4
+{
+	uint32_t asn;
+	uint32_t local_asn;
+	uint16_t if_idx;
+	uint16_t af;
+	struct   in_addr peer_ip;
+	struct   in_addr local_ip;
+	uint16_t old_state;
+	uint16_t new_state;
+} __attribute__((packed));
+
+struct bgp4mp_message_as4_v6
+{
+	uint32_t asn;
+	uint32_t local_asn;
+	uint16_t if_idx;
+	uint16_t af;
+	struct   in6_addr peer_ip;
+	struct   in6_addr local_ip;
+} __attribute__((packed));
+
+struct bgp4mp_message_as4_v4
+{
+	uint32_t asn;
+	uint32_t local_asn;
+	uint16_t if_idx;
+	uint16_t af;
+	struct   in_addr peer_ip;
+	struct   in_addr local_ip;
+} __attribute__((packed));
+
 
 void print_hex(void *, int, int);
 void print_help(char *);

@@ -476,18 +476,88 @@ int parse_ipvN_unicast(uint8_t *input, int family)
 	return index;
 }
 
+
+int parse_bgp4mp_message_as4(uint8_t *input, int family)
+{
+	int index = 0;
+
+	struct bgp4mp_state_change *header = (struct bgp4mp_state_change *)input;
+
+	printf("peer ASN: %u\n", htonl(header->asn));
+	printf("local ASN: %u\n", htonl(header->local_asn));
+	printf("interface ID: %u\n", htons(header->if_idx));
+	printf("AF: %u\n", htons(header->af));
+
+	switch (htons(header->af)) {
+	case 1: {
+		struct bgp4mp_state_change_v4 *v4header = (struct bgp4mp_state_change_v4 *)input;
+		char addr_str[INET_ADDRSTRLEN];
+		inet_ntop(AF_INET, &v4header->peer_ip, addr_str, INET_ADDRSTRLEN);
+		printf("Peer IP: %s\n", addr_str);
+		inet_ntop(AF_INET, &v4header->local_ip, addr_str, INET_ADDRSTRLEN);
+		printf("Local IP: %s\n", addr_str);
+
+		break;
+	}
+	case 2: {
+		struct bgp4mp_state_change_v6 *v6header = (struct bgp4mp_state_change_v6 *)input;
+		char addr_str[INET6_ADDRSTRLEN];
+		inet_ntop(AF_INET6, &v6header->peer_ip, addr_str, INET6_ADDRSTRLEN);
+		printf("Peer IP: %s\n", addr_str);
+		inet_ntop(AF_INET6, &v6header->local_ip, addr_str, INET6_ADDRSTRLEN);
+		printf("Local IP: %s\n", addr_str);
+
+		break;
+	}
+	default: {
+		fprintf(stderr, "Bad AF value in MP4_STATE_CHANGE: %u\n", htons(header->af));
+	}
+	}
+
+	return index;
+}
+
 int parse_bgp4mp_state_change(uint8_t *input, int family)
 {
 	int index = 0;
 
-	struct bgp4mp_state_change header;
+	struct bgp4mp_state_change *header = (struct bgp4mp_state_change *)input;
 
-	memcpy(&header, input, sizeof(header));
+	printf("peer ASN: %u\n", htonl(header->asn));
+	printf("local ASN: %u\n", htonl(header->local_asn));
+	printf("interface ID: %u\n", htons(header->if_idx));
+	printf("AF: %u\n", htons(header->af));
 
-	printf("peer ASN: %u\n", htonl(header.asn));
-	printf("local ASN: %u\n", htonl(header.local_asn));
-	printf("interface ID: %u\n", htons(header.if_idx));
-	printf("AF: %u\n", htons(header.af));
+	switch (htons(header->af)) {
+	case 1: {
+		struct bgp4mp_state_change_v4 *v4header = (struct bgp4mp_state_change_v4 *)input;
+		char addr_str[INET_ADDRSTRLEN];
+		inet_ntop(AF_INET, &v4header->peer_ip, addr_str, INET_ADDRSTRLEN);
+		printf("Peer IP: %s\n", addr_str);
+		inet_ntop(AF_INET, &v4header->local_ip, addr_str, INET_ADDRSTRLEN);
+		printf("Local IP: %s\n", addr_str);
+
+		printf("Old state: %u\n", htons(v4header->old_state));
+		printf("New state: %u\n", htons(v4header->new_state));
+		break;
+	}
+	case 2: {
+		struct bgp4mp_state_change_v6 *v6header = (struct bgp4mp_state_change_v6 *)input;
+		char addr_str[INET6_ADDRSTRLEN];
+		inet_ntop(AF_INET6, &v6header->peer_ip, addr_str, INET6_ADDRSTRLEN);
+		printf("Peer IP: %s\n", addr_str);
+		inet_ntop(AF_INET6, &v6header->local_ip, addr_str, INET6_ADDRSTRLEN);
+		printf("Local IP: %s\n", addr_str);
+
+		printf("Old state: %u\n", htons(v6header->old_state));
+		printf("New state: %u\n", htons(v6header->new_state));
+		break;
+	}
+	default: {
+		fprintf(stderr, "Bad AF value in MP4_STATE_CHANGE: %u\n", htons(header->af));
+	}
+	}
+
 
 	return index;
 }
@@ -612,6 +682,7 @@ int main(int argc, char *argv[])
 			break;
 		}
 		case MRT_BGP4MP: {
+			switch (header.subtype) {
 			case BGP4MP_STATE_CHANGE: {
 				printf("LOOKS OK 1\n");
 				uint8_t *input = (uint8_t *)malloc(header.length);
@@ -628,7 +699,11 @@ int main(int argc, char *argv[])
 			}
 			case BGP4MP_MESSAGE_AS4: {
 				printf("LOOKS OK 3\n");
-				gzseek(file, header.length, SEEK_CUR);
+				uint8_t *input = (uint8_t *)malloc(header.length);
+				gzread(file, input, header.length);
+				uint32_t bytes_parsed = parse_bgp4mp_message_as4(input, header.subtype);
+				free(input);
+				//gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_STATE_CHANGE_AS4: {
@@ -646,7 +721,7 @@ int main(int argc, char *argv[])
 				gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
-
+			}
 		}
 		default: {
 			if (debug) {
