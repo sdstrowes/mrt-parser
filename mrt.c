@@ -482,6 +482,7 @@ int parse_bgp_message(uint8_t *input)
 	int index = 0;
 
 	struct bgp_message_header *header = (struct bgp_message_header *)input;
+	index += sizeof(struct bgp_message_header);
 
 	int i;
 	for (i = 0; i < 16; i++) {
@@ -500,7 +501,68 @@ int parse_bgp_message(uint8_t *input)
 		break;
 	}
 	case BGP_MSG_UPDATE: {
-		printf("Unhandled: BGP Update\n");
+		uint16_t *withdrawn_len = (uint16_t *)(input+index);
+		index += sizeof(uint16_t);
+
+		printf("Withdrawn length: 0x%x bytes\n", htons(*withdrawn_len));
+		int i = 0;
+		while (i < htons(*withdrawn_len)) {
+			uint8_t pfx_len = *(input+index);
+			printf("route len: %x\n", pfx_len);
+
+			// bump up to a byte boundary
+			while (pfx_len % 8) {
+				pfx_len++;
+			}
+			//uint8_t buffer[128];
+			//memset(buffer, 0, 128);
+			//memcpy(buffer, input+index, pfx_len);
+			//int j = 0;
+			//for (j = 0; i < 128; j++) {
+			//	printf("%x ", buffer[j]);
+			//}
+			//printf("\n");
+
+			i+= pfx_len;
+			index += pfx_len;
+		}
+
+		uint16_t *path_attr_len = (uint16_t *)(input+index);
+		index += sizeof(uint16_t);
+
+		printf("Path Attr length: 0x%x\n", htons(*path_attr_len));
+
+		while (i < htons(*path_attr_len)) {
+			struct bgp_attr_header attr_header;
+			memcpy(&attr_header, input+index, sizeof(attr_header));
+
+			// Bit hacky: header field isn't always the same length.
+			i     += sizeof(attr_header.flags) + sizeof(attr_header.code);
+			index += sizeof(attr_header.flags) + sizeof(attr_header.code);
+			if (attr_header.flags & 0x10) {
+				memcpy(&attr_header.len, input+index, sizeof(attr_header.len));
+				i     += sizeof(attr_header.len);
+				index += sizeof(attr_header.len);
+				attr_header.len = ntohs(attr_header.len);
+			}
+			else {
+				attr_header.len = input[index];
+				i     += sizeof(input[index]);
+				index += sizeof(input[index]);
+			}
+
+			if (debug) {
+				printf("\n--- BGP ATTRIBUTE HEADER ---\n");
+				print_hex(&attr_header, 0, sizeof(attr_header));
+				printf(" flags: %x\n",    attr_header.flags);
+				printf(" typecode: %x\n", attr_header.code);
+				printf(" length: %u\n",   attr_header.len);
+			}
+
+			i     += attr_header.len;
+			index += attr_header.len;
+		}
+
 		break;
 	}
 	case BGP_MSG_NOTIFICATION: {
