@@ -476,6 +476,45 @@ int parse_ipvN_unicast(uint8_t *input, int family)
 	return index;
 }
 
+// RFC4271, Section 4.1
+int parse_bgp_message(uint8_t *input)
+{
+	int index = 0;
+
+	struct bgp_message_header *header = (struct bgp_message_header *)input;
+
+	int i;
+	for (i = 0; i < 16; i++) {
+		uint8_t cmp = 0xff;
+		if (memcmp(&header->marker[i], &cmp, sizeof(uint8_t))) {
+			fprintf(stderr, "ERROR: Marker on BGP header is not all-ones!\n");
+			return index;
+		}
+	}
+
+	printf("BGP Message length: %x\n", htons(header->length));
+
+	switch (header->type) {
+	case BGP_MSG_OPEN: {
+		printf("Unhandled: BGP Open\n");
+		break;
+	}
+	case BGP_MSG_UPDATE: {
+		printf("Unhandled: BGP Update\n");
+		break;
+	}
+	case BGP_MSG_NOTIFICATION: {
+		printf("Unhandled: BGP Notification\n");
+		break;
+	}
+	case BGP_MSG_KEEPALIVE: {
+		printf("Unhandled: BGP Keepalive\n");
+		break;
+	}
+	}
+
+	return index;
+}
 
 int parse_bgp4mp_message_as4(uint8_t *input, int family)
 {
@@ -490,22 +529,30 @@ int parse_bgp4mp_message_as4(uint8_t *input, int family)
 
 	switch (htons(header->af)) {
 	case 1: {
-		struct bgp4mp_state_change_v4 *v4header = (struct bgp4mp_state_change_v4 *)input;
+		struct bgp4mp_message_as4_v4 *v4header = (struct bgp4mp_message_as4_v4 *)input;
+		index += sizeof(struct bgp4mp_message_as4_v4);
+
 		char addr_str[INET_ADDRSTRLEN];
 		inet_ntop(AF_INET, &v4header->peer_ip, addr_str, INET_ADDRSTRLEN);
 		printf("Peer IP: %s\n", addr_str);
 		inet_ntop(AF_INET, &v4header->local_ip, addr_str, INET_ADDRSTRLEN);
 		printf("Local IP: %s\n", addr_str);
 
+		parse_bgp_message(input+index);
+
 		break;
 	}
 	case 2: {
 		struct bgp4mp_state_change_v6 *v6header = (struct bgp4mp_state_change_v6 *)input;
+		index += sizeof(struct bgp4mp_message_as4_v6);
+
 		char addr_str[INET6_ADDRSTRLEN];
 		inet_ntop(AF_INET6, &v6header->peer_ip, addr_str, INET6_ADDRSTRLEN);
 		printf("Peer IP: %s\n", addr_str);
 		inet_ntop(AF_INET6, &v6header->local_ip, addr_str, INET6_ADDRSTRLEN);
 		printf("Local IP: %s\n", addr_str);
+
+		parse_bgp_message(input+index);
 
 		break;
 	}

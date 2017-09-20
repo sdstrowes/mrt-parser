@@ -195,6 +195,18 @@ struct bgp4mp_message_as4_v4
 	struct   in_addr local_ip;
 } __attribute__((packed));
 
+#define BGP_MSG_OPEN         1
+#define BGP_MSG_UPDATE       2
+#define BGP_MSG_NOTIFICATION 3
+#define BGP_MSG_KEEPALIVE    4
+
+struct bgp_message_header
+{
+	uint8_t  marker[16];
+	uint16_t length;
+	uint8_t  type;
+} __attribute__((packed));
+
 
 void print_hex(void *, int, int);
 void print_help(char *);
