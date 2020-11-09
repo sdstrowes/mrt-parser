@@ -43,6 +43,13 @@ rfc4760
         | Network Layer Reachability Information (variable)       |
         +---------------------------------------------------------+
 */
+
+struct nlri
+{
+	uint32_t net;
+	uint16_t masklen;
+};
+
 int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *input, int len)
 {
 	int index = 0;
@@ -85,6 +92,10 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 	char *buffer_idx = buffer;
 	int remaining    = buffer_len;
 
+	struct nlri outputs[256];
+	int n = 0;
+	memset(outputs, 0, sizeof (struct nlri)*256);
+
 	while (index < len) {
 		uint8_t nlri_len;
 		memcpy(&nlri_len, input+index, 1);
@@ -104,7 +115,12 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 			char addr_str[INET_ADDRSTRLEN];
 			inet_ntop(AF_INET, input+index, addr_str, INET_ADDRSTRLEN);
 
-			int n = snprintf(buffer_idx, remaining, "%s/%u", addr_str, nlri_len);
+			//memcpy(&outputs[n].net, input+index, sizeof(uint32_t));
+			//outputs[n].masklen = nlri_len;
+			//n += 1;
+
+			//int n = snprintf(buffer_idx, remaining, "%s/%u", addr_str, nlri_len);
+			int n = sprintf(buffer_idx, "%s/%u", addr_str, nlri_len);
 			buffer_idx += n;
 			remaining  -= n;
 
@@ -121,7 +137,8 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 			char addr_str[INET6_ADDRSTRLEN];
 			inet_ntop(AF_INET6, input+index, addr_str, INET6_ADDRSTRLEN);
 
-			int n = snprintf(buffer_idx, remaining, "%s/%u", addr_str, nlri_len);
+			//int n = snprintf(buffer_idx, remaining, "%s/%u", addr_str, nlri_len);
+			int n = sprintf(buffer_idx, "%s/%u", addr_str, nlri_len);
 			buffer_idx += n;
 			remaining  -= n;
 
@@ -153,20 +170,27 @@ int parse_bgp_path_attr_community(char *buffer, int buffer_len, uint8_t *input, 
 	char *buffer_idx = buffer;
 	int remaining = buffer_len;
 	while (idx < len) {
-		if (idx != 0) {
-			snprintf(buffer_idx, remaining, " ");
-			buffer_idx ++;
-			remaining  --;
-		}
 		uint16_t *a, *b;
 		a = (uint16_t *)(input+idx);
 		idx += 2;
 		b = (uint16_t *)(input+idx);
 		idx += 2;
 
-		snprintf(buffer_idx, remaining, "%04x:%04x", *a, *b);
-		buffer_idx += 9;
-		remaining  -= 9;
+		if (idx != 0) {
+			//snprintf(buffer_idx, remaining, " ");
+			//buffer_idx ++;
+			//remaining  --;
+			//snprintf(buffer_idx, remaining, " %04x:%04x", *a, *b);
+			sprintf(buffer_idx, " %04x:%04x", *a, *b);
+			buffer_idx += 10;
+			remaining  -= 10;
+		}
+		else {
+			//snprintf(buffer_idx, remaining, "%04x:%04x", *a, *b);
+			sprintf(buffer_idx, "%04x:%04x", *a, *b);
+			buffer_idx += 9;
+			remaining  -= 9;
+		}
 	}
 
 	return len;
@@ -210,22 +234,38 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
 			while (hop_count < header.count) {
 				asn = (uint32_t *)(input+idx);
 				if (hop_count == 0) {
-					snprintf(buffer_idx, remaining, " {");
-					buffer_idx += 2;
-					remaining  -= 2;
+					//snprintf(buffer_idx, remaining, " {");
+					//buffer_idx += 2;
+					//remaining  -= 2;
+
+					//n = snprintf(buffer_idx, remaining, " {%u", htonl(*asn));
+					n = sprintf(buffer_idx, " {%u", htonl(*asn));
+					buffer_idx += n;
+					remaining  -= n;
+					idx += sizeof(uint32_t);
+					hop_count++;
 				}
 				else {
-					snprintf(buffer_idx, remaining, ",");
-					buffer_idx++;
-					remaining--;
+					//snprintf(buffer_idx, remaining, ",");
+					//buffer_idx++;
+					//remaining--;
+
+					//n = snprintf(buffer_idx, remaining, ",%u", htonl(*asn));
+					n = sprintf(buffer_idx, ",%u", htonl(*asn));
+					buffer_idx += n;
+					remaining  -= n;
+					idx += sizeof(uint32_t);
+					hop_count++;
+
 				}
-				n = snprintf(buffer_idx, remaining, "%u", htonl(*asn));
-				buffer_idx += n;
-				remaining  -= n;
-				idx += sizeof(uint32_t);
-				hop_count++;
+				//n = snprintf(buffer_idx, remaining, "%u", htonl(*asn));
+				//buffer_idx += n;
+				//remaining  -= n;
+				//idx += sizeof(uint32_t);
+				//hop_count++;
 			}
-			snprintf(buffer_idx, remaining, "}");
+			//snprintf(buffer_idx, remaining, "}");
+			sprintf(buffer_idx, "}");
 			buffer_idx++;
 			remaining--;
 		}
@@ -233,15 +273,26 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
 			while (hop_count < header.count) {
 				asn = (uint32_t *)(input+idx);
 				if (hop_count != 0) {
-					snprintf(buffer_idx, remaining, " ");
-					buffer_idx++;
-					remaining--;
+					//snprintf(buffer_idx, remaining, " ");
+					//buffer_idx++;
+					//remaining--;
+
+					//n = snprintf(buffer_idx, remaining, " %u", htonl(*asn));
+					n = sprintf(buffer_idx, " %u", htonl(*asn));
+					buffer_idx += n;
+					remaining  -= n;
+					idx += sizeof(uint32_t);
+					hop_count++;
+
 				}
-				n = snprintf(buffer_idx, remaining, "%u", htonl(*asn));
-				buffer_idx += n;
-				remaining  -= n;
-				idx += sizeof(uint32_t);
-				hop_count++;
+				else {
+					//n = snprintf(buffer_idx, remaining, "%u", htonl(*asn));
+					n = sprintf(buffer_idx, "%u", htonl(*asn));
+					buffer_idx += n;
+					remaining  -= n;
+					idx += sizeof(uint32_t);
+					hop_count++;
+				}
 			}
 		}
 	}
@@ -260,7 +311,7 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
            ... time                   | Attribute Length              |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_entry(uint8_t *input)
+int parse_entry(uint8_t *input, char *net, uint16_t pfxlen)
 {
 	struct table_dump_v2_ipv6_unicast_header header;
 	uint16_t index = 0;
@@ -405,7 +456,7 @@ int parse_entry(uint8_t *input)
 		index += attr_header.len;
 	}
 
-	printf("||%s|%s||%s\n", aspath_buffer, nexthop_buffer, communities_buffer);
+	printf("%s/%u||%s|%s||%s\n", net, pfxlen, aspath_buffer, nexthop_buffer, communities_buffer);
 
 	if (index != sizeof(header) + header.attr_len) {
 		printf("Warning: bad length detected in IPv6 unicast entry: %u != %u\n",
@@ -469,8 +520,7 @@ int parse_ipvN_unicast(uint8_t *input, int family)
 
 	uint16_t i;
 	for (i = 0; i < entries_count; i++) {
-		printf("%s/%u", out_str, pfx_len);
-		index += parse_entry(input+index);
+		index += parse_entry(input+index, out_str, pfx_len);
 	}
 
 	return index;
@@ -770,11 +820,11 @@ int main(int argc, char *argv[])
 					uint32_t bytes_parsed = parse_ipvN_unicast(input, header.subtype);
 					free(input);
 
-					if (bytes_parsed != header.length) {
-						printf("Error: parsed %u bytes from a header length %u\n",
-							bytes_parsed, header.length);
-						exit(EXIT_FAILURE);
-					}
+//					if (bytes_parsed != header.length) {
+//						printf("Error: parsed %u bytes from a header length %u\n",
+//							bytes_parsed, header.length);
+//						exit(EXIT_FAILURE);
+//					}
 				}
 				else {
 					gzseek(file, header.length, SEEK_CUR);
