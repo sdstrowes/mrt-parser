@@ -50,6 +50,134 @@ struct nlri
 	uint16_t masklen;
 };
 
+
+
+struct peer_index_header
+{
+	uint32_t collector_bgp_id;
+	uint16_t view_name_length;
+	uint16_t peer_count;
+};
+
+struct peer
+{
+	uint8_t  type;
+	uint32_t bgp_id;
+	char     ip_addr[INET6_ADDRSTRLEN];
+	uint32_t asn;
+};
+
+int parse_peer_index_table(uint8_t *input, struct peer **peer_index_ptr)
+{
+	int index = 0;
+
+	struct peer *peer_index;
+
+	struct peer_index_header header;
+	memcpy(&header, input, sizeof(header));
+
+	header.collector_bgp_id = ntohl(header.collector_bgp_id);
+	header.view_name_length = ntohs(header.view_name_length);
+	header.peer_count       = ntohs(header.peer_count);
+
+	index += sizeof(header);
+
+	if (debug) {
+		printf("Peer count: %u\n", header.peer_count);
+		printf("View name length: %u\n", header.view_name_length);
+	}
+
+	peer_index = (struct peer *)malloc(sizeof(struct peer) * header.peer_count);
+	*peer_index_ptr = peer_index;
+
+	/*
+	   The Peer Type field is a bit field that encodes the type of the AS
+	   and IP address as identified by the A and I bits, respectively,
+	   below.
+
+	       0 1 2 3 4 5 6 7
+	      +-+-+-+-+-+-+-+-+
+	      | | | | | | |A|I|
+	      +-+-+-+-+-+-+-+-+
+
+	      Bit 6: Peer AS number size:  0 = 16 bits, 1 = 32 bits
+	      Bit 7: Peer IP Address family:  0 = IPv4,  1 = IPv6
+
+	                         Figure 7: Peer Type Field
+
+	*/
+	// 0: IPv4 / 16 bits
+	// 1: IPv6 / 16 bits
+	// 2: IPv4 / 32 bits
+	// 3: IPv6 / 32 bits
+	for (int i = 0; i < header.peer_count; i++) {
+		//print_hex(input, index, 48);
+		struct peer peer;
+		memset(&peer, 0, sizeof(struct peer));
+		peer.type = input[index++];
+
+		switch (peer.type) {
+		case 0: {
+			memcpy(&peer.bgp_id, input+index, sizeof(uint32_t));
+			index += 4;
+			inet_ntop(AF_INET, input+index, peer.ip_addr, INET6_ADDRSTRLEN);
+			index += 4;
+			uint16_t tmp;
+			memcpy(&tmp, input+index, sizeof(uint16_t));
+			peer.asn = htons(tmp);
+			index += 2;
+
+			break;
+		}
+		case 1: {
+			memcpy(&peer.bgp_id, input+index, sizeof(uint32_t));
+			index += 4;
+			inet_ntop(AF_INET6, input+index, peer.ip_addr, INET6_ADDRSTRLEN);
+			index += 16;
+			uint16_t tmp;
+			memcpy(&tmp, input+index, sizeof(uint16_t));
+			peer.asn = htons(tmp);
+			index += 2;
+
+			break;
+		}
+		case 2: {
+			memcpy(&peer.bgp_id, input+index, sizeof(uint32_t));
+			index += 4;
+			inet_ntop(AF_INET, input+index, peer.ip_addr, INET6_ADDRSTRLEN);
+			index += 4;
+			memcpy(&peer.asn, input+index, sizeof(uint32_t));
+			peer.asn = htonl(peer.asn);
+			index += 4;
+
+			break;
+		}
+		case 3: {
+			memcpy(&peer.bgp_id, input+index, sizeof(uint32_t));
+			index += 4;
+			inet_ntop(AF_INET6, input+index, peer.ip_addr, INET6_ADDRSTRLEN);
+			index += 16;
+			memcpy(&peer.asn, input+index, sizeof(uint32_t));
+			peer.asn = htonl(peer.asn);
+			index += 4;
+
+			break;
+		}
+		default: {
+			printf("ERROR: Parsing peer index type\n");
+		}
+		}
+
+		memcpy(peer_index+i, &peer, sizeof(struct peer));
+
+		if (debug) {
+			printf("Peer idx:%u: %x, %s, %u\n", i, peer.bgp_id, peer.ip_addr, peer.asn);
+		}
+	}
+
+	return index;
+}
+
 int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *input, int len)
 {
 	int index = 0;
@@ -167,6 +295,7 @@ int parse_bgp_path_attr_community(char *buffer, int buffer_len, uint8_t *input, 
 	}
 
 	int idx = 0;
+	int i = 0;
 	char *buffer_idx = buffer;
 	int remaining = buffer_len;
 	while (idx < len) {
@@ -176,21 +305,23 @@ int parse_bgp_path_attr_community(char *buffer, int buffer_len, uint8_t *input, 
 		b = (uint16_t *)(input+idx);
 		idx += 2;
 
-		if (idx != 0) {
+		if (i != 0) {
 			//snprintf(buffer_idx, remaining, " ");
 			//buffer_idx ++;
 			//remaining  --;
 			//snprintf(buffer_idx, remaining, " %04x:%04x", *a, *b);
-			sprintf(buffer_idx, " %04x:%04x", *a, *b);
+			sprintf(buffer_idx, " %u:%u", *a, *b);
 			buffer_idx += 10;
 			remaining  -= 10;
 		}
 		else {
 			//snprintf(buffer_idx, remaining, "%04x:%04x", *a, *b);
-			sprintf(buffer_idx, "%04x:%04x", *a, *b);
+			sprintf(buffer_idx, "%u:%u", *a, *b);
 			buffer_idx += 9;
 			remaining  -= 9;
 		}
+
+		i++;
 	}
 
 	return len;
@@ -198,6 +329,13 @@ int parse_bgp_path_attr_community(char *buffer, int buffer_len, uint8_t *input, 
 
 int parse_bgp_path_attr_nexthop(char *buffer, int remaining, uint8_t *input, int len)
 {
+	if (len == 4) {
+		inet_ntop(AF_INET, input, buffer, INET_ADDRSTRLEN);
+	}
+	else if (len == 16) {
+		inet_ntop(AF_INET6, input, buffer, INET6_ADDRSTRLEN);
+	}
+
 	return len;
 }
 
@@ -311,7 +449,7 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
            ... time                   | Attribute Length              |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_entry(uint8_t *input, char *net, uint16_t pfxlen)
+int parse_entry(struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char *net, uint16_t pfxlen)
 {
 	struct table_dump_v2_ipv6_unicast_header header;
 	uint16_t index = 0;
@@ -321,10 +459,10 @@ int parse_entry(uint8_t *input, char *net, uint16_t pfxlen)
 
 	index += sizeof(header);
 
-	if (debug) {
-		header.peer_idx = htons(header.peer_idx);
-		header.orig_ts  = htonl(header.orig_ts);
+	header.peer_idx = htons(header.peer_idx);
+	header.orig_ts  = htonl(header.orig_ts);
 
+	if (debug) {
 		printf("\n--- TABLE_DUMP_V2 IPv6 UNICAST ENTRY HEADER ---\n");
 		print_hex(&header, 0, sizeof(header));
 		printf(" peer_index:%u\n", header.peer_idx);
@@ -456,7 +594,11 @@ int parse_entry(uint8_t *input, char *net, uint16_t pfxlen)
 		index += attr_header.len;
 	}
 
-	printf("%s/%u||%s|%s||%s\n", net, pfxlen, aspath_buffer, nexthop_buffer, communities_buffer);
+	printf("TABLE_DUMP2|%u|B|%s|%u|%s/%u|%s|IGP|%s|0|0|%s|NAG||\n",
+		mrt_timestamp,
+		peer[header.peer_idx].ip_addr,
+		peer[header.peer_idx].asn,
+		net, pfxlen, aspath_buffer, nexthop_buffer, communities_buffer);
 
 	if (index != sizeof(header) + header.attr_len) {
 		printf("Warning: bad length detected in IPv6 unicast entry: %u != %u\n",
@@ -482,7 +624,7 @@ int parse_entry(uint8_t *input, char *net, uint16_t pfxlen)
             ....       |    Entry Count                |
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_ipvN_unicast(uint8_t *input, int family)
+int parse_ipvN_unicast(struct peer *peer_index, uint8_t *input, uint32_t mrt_timestamp, int family)
 {
 	int index = 0;
 
@@ -520,7 +662,7 @@ int parse_ipvN_unicast(uint8_t *input, int family)
 
 	uint16_t i;
 	for (i = 0; i < entries_count; i++) {
-		index += parse_entry(input+index, out_str, pfx_len);
+		index += parse_entry(peer_index, mrt_timestamp, input+index, out_str, pfx_len);
 	}
 
 	return index;
@@ -737,6 +879,9 @@ int main(int argc, char *argv[])
 	debug  = false;
 	bool parsev4 = false;
 	bool parsev6 = false;
+	bool parse_peerindex = true;
+
+	struct peer *peer_index = NULL;
 
 	int opt;
 	while ((opt = getopt(argc, argv, "46df:h")) != -1) {
@@ -795,11 +940,26 @@ int main(int argc, char *argv[])
 		switch (header.type) {
 		case MRT_TABLE_DUMP_V2: {
 			switch (header.subtype) {
+			case TABLE_DUMP_V2_PEER_INDEX_TABLE: {
+				if (parse_peerindex) {
+					uint8_t *input = (uint8_t *)malloc(header.length);
+					gzread(file, input, header.length);
+					uint32_t bytes_parsed = parse_peer_index_table(input, &peer_index);
+					free(input);
+
+					if (bytes_parsed != header.length) {
+						printf("Error: parsed %u bytes from a header length %u\n",
+							bytes_parsed, header.length);
+						exit(EXIT_FAILURE);
+					}
+				}
+				break;
+			}
 			case TABLE_DUMP_V2_RIB_IPV4_UNICAST: {
 				if (parsev4) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
 					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(input, header.subtype);
+					uint32_t bytes_parsed = parse_ipvN_unicast(peer_index, input, header.ts, header.subtype);
 					free(input);
 
 					if (bytes_parsed != header.length) {
@@ -817,7 +977,7 @@ int main(int argc, char *argv[])
 				if (parsev6) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
 					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(input, header.subtype);
+					uint32_t bytes_parsed = parse_ipvN_unicast(peer_index, input, header.ts, header.subtype);
 					free(input);
 
 //					if (bytes_parsed != header.length) {
