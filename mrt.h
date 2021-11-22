@@ -71,6 +71,9 @@ From RFC 6396, Appendix A:
 // rfc4760, page 3
 #define BGP_PATH_ATTR_MP_REACH_NLRI 14
 
+// rfc6793, most usefully section 4.1; this probably doesn't exist if all parties support 32-bit ASNs
+#define BGP_PATH_ATTR_AS4_AGGREGATOR 18
+
 // Mask test
 #define BGP_PATH_ATTR_ORIGIN_MASK        0x0001
 #define BGP_PATH_ATTR_ASPATH_MASK        0x0002

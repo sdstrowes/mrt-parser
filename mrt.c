@@ -10,6 +10,7 @@
 #include <zlib.h>
 
 #include "mrt.h"
+#include "mrt-parser-types.h"
 
 static bool debug;
 
@@ -243,11 +244,6 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 			char addr_str[INET_ADDRSTRLEN];
 			inet_ntop(AF_INET, input+index, addr_str, INET_ADDRSTRLEN);
 
-			//memcpy(&outputs[n].net, input+index, sizeof(uint32_t));
-			//outputs[n].masklen = nlri_len;
-			//n += 1;
-
-			//int n = snprintf(buffer_idx, remaining, "%s/%u", addr_str, nlri_len);
 			int n = sprintf(buffer_idx, "%s/%u", addr_str, nlri_len);
 			buffer_idx += n;
 			remaining  -= n;
@@ -265,7 +261,6 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 			char addr_str[INET6_ADDRSTRLEN];
 			inet_ntop(AF_INET6, input+index, addr_str, INET6_ADDRSTRLEN);
 
-			//int n = snprintf(buffer_idx, remaining, "%s/%u", addr_str, nlri_len);
 			int n = sprintf(buffer_idx, "%s/%u", addr_str, nlri_len);
 			buffer_idx += n;
 			remaining  -= n;
@@ -301,24 +296,33 @@ int parse_bgp_path_attr_community(char *buffer, int buffer_len, uint8_t *input, 
 	while (idx < len) {
 		uint16_t *a, *b;
 		a = (uint16_t *)(input+idx);
+		*a = htons(*a);
 		idx += 2;
 		b = (uint16_t *)(input+idx);
+		*b = htons(*b);
 		idx += 2;
 
 		if (i != 0) {
-			//snprintf(buffer_idx, remaining, " ");
-			//buffer_idx ++;
-			//remaining  --;
-			//snprintf(buffer_idx, remaining, " %04x:%04x", *a, *b);
-			sprintf(buffer_idx, " %u:%u", *a, *b);
-			buffer_idx += 10;
-			remaining  -= 10;
+			int rc = snprintf(buffer_idx, remaining, " %u:%u", *a, *b);
+			if (rc < 0) {
+				printf("ERROR: Cannot write community\n");
+			}
+			else if (rc >= remaining) {
+				printf("ERROR: Not enough space in buffer for community\n");
+			}
+			buffer_idx += rc;
+			remaining  -= rc;
 		}
 		else {
-			//snprintf(buffer_idx, remaining, "%04x:%04x", *a, *b);
-			sprintf(buffer_idx, "%u:%u", *a, *b);
-			buffer_idx += 9;
-			remaining  -= 9;
+			int rc = snprintf(buffer_idx, remaining, "%u:%u", *a, *b);
+			if (rc < 0) {
+				printf("ERROR: Cannot write community\n");
+			}
+			else if (rc >= remaining) {
+				printf("ERROR: Not enough space in buffer for community\n");
+			}
+			buffer_idx += rc;
+			remaining  -= rc;
 		}
 
 		i++;
@@ -372,11 +376,6 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
 			while (hop_count < header.count) {
 				asn = (uint32_t *)(input+idx);
 				if (hop_count == 0) {
-					//snprintf(buffer_idx, remaining, " {");
-					//buffer_idx += 2;
-					//remaining  -= 2;
-
-					//n = snprintf(buffer_idx, remaining, " {%u", htonl(*asn));
 					n = sprintf(buffer_idx, " {%u", htonl(*asn));
 					buffer_idx += n;
 					remaining  -= n;
@@ -384,25 +383,13 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
 					hop_count++;
 				}
 				else {
-					//snprintf(buffer_idx, remaining, ",");
-					//buffer_idx++;
-					//remaining--;
-
-					//n = snprintf(buffer_idx, remaining, ",%u", htonl(*asn));
 					n = sprintf(buffer_idx, ",%u", htonl(*asn));
 					buffer_idx += n;
 					remaining  -= n;
 					idx += sizeof(uint32_t);
 					hop_count++;
-
 				}
-				//n = snprintf(buffer_idx, remaining, "%u", htonl(*asn));
-				//buffer_idx += n;
-				//remaining  -= n;
-				//idx += sizeof(uint32_t);
-				//hop_count++;
 			}
-			//snprintf(buffer_idx, remaining, "}");
 			sprintf(buffer_idx, "}");
 			buffer_idx++;
 			remaining--;
@@ -410,27 +397,16 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
 		else if (header.type == ASPATH_AS_SEQ) {
 			while (hop_count < header.count) {
 				asn = (uint32_t *)(input+idx);
-				if (hop_count != 0) {
-					//snprintf(buffer_idx, remaining, " ");
-					//buffer_idx++;
-					//remaining--;
-
-					//n = snprintf(buffer_idx, remaining, " %u", htonl(*asn));
+				if (strlen(buffer) > 0) {
 					n = sprintf(buffer_idx, " %u", htonl(*asn));
-					buffer_idx += n;
-					remaining  -= n;
-					idx += sizeof(uint32_t);
-					hop_count++;
-
 				}
 				else {
-					//n = snprintf(buffer_idx, remaining, "%u", htonl(*asn));
 					n = sprintf(buffer_idx, "%u", htonl(*asn));
-					buffer_idx += n;
-					remaining  -= n;
-					idx += sizeof(uint32_t);
-					hop_count++;
 				}
+				buffer_idx += n;
+				remaining  -= n;
+				idx += sizeof(uint32_t);
+				hop_count++;
 			}
 		}
 	}
@@ -488,6 +464,13 @@ int parse_entry(struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char 
 	char communities_buffer[buf_len];
 	communities_buffer[0] = '\0';
 
+	char agg_nag[buf_len];
+	agg_nag[0] = '\0';
+	char agg_buffer[buf_len];
+	agg_buffer[0] = '\0';
+
+	enum origin origin = ORIGIN_UNKNOWN;
+	uint32_t exitdisc = 0;
 
 	/* parse BGP attributes */
 	while (index < sizeof(header) + header.attr_len) {
@@ -517,10 +500,28 @@ int parse_entry(struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char 
 		switch (attr_header.code) {
 		case BGP_PATH_ATTR_ORIGIN: {
 			if (debug) {
-				printf("Skipping PATH_ATTR_ORIGIN type (%u)\n", attr_header.code);
+				printf("Skipping PATH_ATTR_ORIGIN type:%u, length:%u\n", attr_header.code, attr_header.len);
 			}
 			/* Clear mask */
 			mask -= BGP_PATH_ATTR_ORIGIN_MASK;
+
+			uint8_t tmp = input[index];
+			switch(tmp) {
+			case 0: {
+				origin = IGP;
+				break;
+			}
+			case 1: {
+				origin = EGP;
+				break;
+			}
+			case 2: {
+				origin = INCOMPLETE;
+				break;
+			}
+			}
+
+
 			break;
 		}
 		case BGP_PATH_ATTR_ASPATH: {
@@ -542,29 +543,42 @@ int parse_entry(struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char 
 			break;
 		}
 		case BGP_PATH_ATTR_EXITDISC: {
-			if (debug) {
-				printf("Skipping PATH_ATTR_EXIT_DISC type (%u)\n", attr_header.code);
-			}
+			memcpy(&exitdisc, input+index, attr_header.len);
+			exitdisc = htonl(exitdisc);
+
 			break;
 		}
 		case BGP_PATH_ATTR_LOCALPREF: {
 			if (debug) {
-				printf("Skipping PATH_ATTR_LOCALPREF type (%u)\n", attr_header.code);
+				printf("Skipping PATH_ATTR_LOCALPREF type:%u, length:%u\n", attr_header.code, attr_header.len);
 			}
 			break;
 		}
 		case BGP_PATH_ATTR_ATOM_AGG: {
-			if (debug) {
-				printf("Skipping PATH_ATTR_ATOM_AGG type (%u)\n", attr_header.code);
-			}
+			strncpy(agg_nag, "AG", buf_len);
+
 			break;
 		}
 		case BGP_PATH_ATTR_AGGREGATOR: {
-			if (debug) {
-				printf("Skipping PATH_ATTR_AGGREGATOR type (%u)\n", attr_header.code);
-			}
+			//strncpy(agg_nag, "AG", buf_len);
+
+			uint32_t asn;
+			memcpy(&asn, input+index, 4);
+			asn = htonl(asn);
+
+			char addr_str[INET_ADDRSTRLEN];
+			inet_ntop(AF_INET, input+index+4, addr_str, INET_ADDRSTRLEN);
+
+			sprintf(agg_buffer, "%u %s", asn, addr_str);
+
 			break;
 		}
+		case BGP_PATH_ATTR_AS4_AGGREGATOR: {
+			fprintf(stderr, "WARN: I've found an AS4_AGGREGATOR attribute\n");
+
+			break;
+		}
+
 		case BGP_PATH_ATTR_COMMUNITY: {
 			int rc = parse_bgp_path_attr_community(communities_buffer, buf_len, input+index, attr_header.len);
 			if (rc != attr_header.len) {
@@ -586,7 +600,7 @@ int parse_entry(struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char 
 		}
 		default: {
 			if (debug) {
-				printf("Skipping type %u\n", attr_header.code);
+				printf("Skipping unrecognised type:%u, length:%u\n", attr_header.code, attr_header.len);
 			}
 		}
 		}
@@ -594,11 +608,15 @@ int parse_entry(struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char 
 		index += attr_header.len;
 	}
 
-	printf("TABLE_DUMP2|%u|B|%s|%u|%s/%u|%s|IGP|%s|0|0|%s|NAG||\n",
+	printf("TABLE_DUMP2|%u|B|%s|%u|%s/%u|%s|%s|%s|0|%u|%s|%s|%s|\n",
 		mrt_timestamp,
 		peer[header.peer_idx].ip_addr,
 		peer[header.peer_idx].asn,
-		net, pfxlen, aspath_buffer, nexthop_buffer, communities_buffer);
+		net, pfxlen, aspath_buffer, 
+		origin_str(origin),
+		nexthop_buffer, exitdisc, communities_buffer,
+		strlen(agg_nag) ? agg_nag : "NAG",
+		agg_buffer);
 
 	if (index != sizeof(header) + header.attr_len) {
 		printf("Warning: bad length detected in IPv6 unicast entry: %u != %u\n",
@@ -642,9 +660,11 @@ int parse_ipvN_unicast(struct peer *peer_index, uint8_t *input, uint32_t mrt_tim
 	while (tmp > 0) {num_bytes++; tmp-=8;}
 
 	if (family == TABLE_DUMP_V2_RIB_IPV6_UNICAST) {
-		struct in6_addr *addr;
-		addr = (struct in6_addr *)(input+index);
-		inet_ntop(AF_INET6, addr, out_str, INET6_ADDRSTRLEN);
+		struct in6_addr addr;
+		memset(&addr, 0, sizeof(struct in6_addr));
+		memcpy(&addr, input+index, num_bytes);
+		memset(out_str, 0, INET6_ADDRSTRLEN);
+		inet_ntop(AF_INET6, &addr, out_str, INET6_ADDRSTRLEN);
 	}
 	else if (family == TABLE_DUMP_V2_RIB_IPV4_UNICAST) {
 		struct sockaddr_in addr;
@@ -706,14 +726,6 @@ int parse_bgp_message(uint8_t *input)
 			while (pfx_len % 8) {
 				pfx_len++;
 			}
-			//uint8_t buffer[128];
-			//memset(buffer, 0, 128);
-			//memcpy(buffer, input+index, pfx_len);
-			//int j = 0;
-			//for (j = 0; i < 128; j++) {
-			//	printf("%x ", buffer[j]);
-			//}
-			//printf("\n");
 
 			i+= pfx_len;
 			index += pfx_len;
@@ -870,6 +882,8 @@ void print_help(char *name)
 	printf("	-f <file>	: Input file (required)\n");
 	printf("	-d		: Turns on debugging.\n");
 	printf("	-h		: Print this help then exit.\n");
+	printf("	-4		: Print only lines with IPv4 announcements.\n");
+	printf("	-6		: Print only lines with IPv6 announcements.\n");
 }
 
 
@@ -1003,7 +1017,6 @@ int main(int argc, char *argv[])
 		case MRT_BGP4MP: {
 			switch (header.subtype) {
 			case BGP4MP_STATE_CHANGE: {
-				printf("LOOKS OK 1\n");
 				uint8_t *input = (uint8_t *)malloc(header.length);
 				gzread(file, input, header.length);
 				uint32_t bytes_parsed = parse_bgp4mp_state_change(input, header.subtype);
@@ -1012,12 +1025,10 @@ int main(int argc, char *argv[])
 				break;
 			}
 			case BGP4MP_MESSAGE: {
-				printf("LOOKS OK 2\n");
 				gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_MESSAGE_AS4: {
-				printf("LOOKS OK 3\n");
 				uint8_t *input = (uint8_t *)malloc(header.length);
 				gzread(file, input, header.length);
 				uint32_t bytes_parsed = parse_bgp4mp_message_as4(input, header.subtype);
@@ -1026,17 +1037,14 @@ int main(int argc, char *argv[])
 				break;
 			}
 			case BGP4MP_STATE_CHANGE_AS4: {
-				printf("LOOKS OK 4\n");
 				gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_MESSAGE_LOCAL: {
-				printf("LOOKS OK 5\n");
 				gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_MESSAGE_AS4_LOCAL: {
-				printf("LOOKS OK 6\n");
 				gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
