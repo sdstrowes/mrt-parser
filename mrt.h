@@ -49,6 +49,12 @@ From RFC 6396, Appendix A:
 #define TABLE_DUMP_V2_RIB_IPV6_UNICAST    4
 #define TABLE_DUMP_V2_RIB_IPV6_MULTICAST  5
 #define TABLE_DUMP_V2_RIB_GENERIC         6
+// RFC 8050, section 4
+#define TABLE_DUMP_V2_RIB_IPV4_UNICAST_ADDPATH    8
+#define TABLE_DUMP_V2_RIB_IPV4_MULTICAST_ADDPATH  9
+#define TABLE_DUMP_V2_RIB_IPV6_UNICAST_ADDPATH   10
+#define TABLE_DUMP_V2_RIB_IPV6_MULTICAST_ADDPATH 11
+#define TABLE_DUMP_V2_RIB_GENERIC_ADDPATH        12
 
 // RFC 6396, section 4.4
 #define BGP4MP_STATE_CHANGE      0
@@ -57,6 +63,11 @@ From RFC 6396, Appendix A:
 #define BGP4MP_STATE_CHANGE_AS4  5
 #define BGP4MP_MESSAGE_LOCAL     6
 #define BGP4MP_MESSAGE_AS4_LOCAL 7
+// RFC 8050, section 3
+#define BGP4MP_MESSAGE_ADDPATH            8
+#define BGP4MP_MESSAGE_AS4_ADDPATH        9
+#define BGP4MP_MESSAGE_LOCAL_ADDPATH     10
+#define BGP4MP_MESSAGE_AS4_LOCAL_ADDPATH 11
 
 // RFC 4271, page 17
 #define BGP_PATH_ATTR_ORIGIN     1
@@ -73,6 +84,9 @@ From RFC 6396, Appendix A:
 
 // rfc6793, most usefully section 4.1; this probably doesn't exist if all parties support 32-bit ASNs
 #define BGP_PATH_ATTR_AS4_AGGREGATOR 18
+
+// rfc8092, section 8
+#define BGP_PATH_ATTR_LARGE_COMMUNITY 32
 
 // Mask test
 #define BGP_PATH_ATTR_ORIGIN_MASK        0x0001
@@ -114,6 +128,14 @@ struct table_dump_v2_ipv6_unicast_header
 {
 	uint16_t peer_idx;
 	uint32_t orig_ts;
+	uint16_t attr_len;
+} __attribute__((packed));
+
+struct table_dump_v2_ipv6_unicast_addpath_header
+{
+	uint16_t peer_idx;
+	uint32_t orig_ts;
+	uint32_t path_id;
 	uint16_t attr_len;
 } __attribute__((packed));
 

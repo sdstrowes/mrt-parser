@@ -53,25 +53,53 @@ struct nlri
 
 
 
+
+/* rfc 6396, section 4.3.1
+        0                   1                   2                   3
+        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                      Collector BGP ID                         |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |       View Name Length        |     View Name (variable)      |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |          Peer Count           |    Peer Entries (variable)
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                    Figure 5: PEER_INDEX_TABLE Subtype
+*/
 struct peer_index_header
 {
 	uint32_t collector_bgp_id;
 	uint16_t view_name_length;
-	uint16_t peer_count;
-};
+} __attribute__((packed));
 
+/* rfc 6396, section 4.3.1
+
+        0                   1                   2                   3
+        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |   Peer Type   |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                         Peer BGP ID                           |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                   Peer IP Address (variable)                  |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                        Peer AS (variable)                     |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                          Figure 6: Peer Entries
+*/
 struct peer
 {
 	uint8_t  type;
 	uint32_t bgp_id;
 	char     ip_addr[INET6_ADDRSTRLEN];
 	uint32_t asn;
-};
+} __attribute__((packed));
 
 int parse_peer_index_table(uint8_t *input, struct peer **peer_index_ptr)
 {
 	int index = 0;
-
 	struct peer *peer_index;
 
 	struct peer_index_header header;
@@ -79,16 +107,27 @@ int parse_peer_index_table(uint8_t *input, struct peer **peer_index_ptr)
 
 	header.collector_bgp_id = ntohl(header.collector_bgp_id);
 	header.view_name_length = ntohs(header.view_name_length);
-	header.peer_count       = ntohs(header.peer_count);
 
-	index += sizeof(header);
+	/* the peer index structure includes a variable length
+	 * view name, so let's just go off-piste and parse that
+	 * out */
+	char view_name[header.view_name_length+1];
+	memset(view_name, '\0', sizeof(view_name));
+	strncpy(view_name, input+sizeof(header), header.view_name_length);
+
+	uint16_t peer_count;
+	memcpy(&peer_count, input + sizeof(header) + header.view_name_length, 2);
+	peer_count = htons(peer_count);
+
+	index += sizeof(header) + header.view_name_length + sizeof(peer_count);
 
 	if (debug) {
-		printf("Peer count: %u\n", header.peer_count);
+		printf("Peer count: %u\n", peer_count);
 		printf("View name length: %u\n", header.view_name_length);
+		printf("View name: %s\n", view_name);
 	}
 
-	peer_index = (struct peer *)malloc(sizeof(struct peer) * header.peer_count);
+	peer_index = (struct peer *)malloc(sizeof(struct peer) * peer_count);
 	*peer_index_ptr = peer_index;
 
 	/*
@@ -111,11 +150,10 @@ int parse_peer_index_table(uint8_t *input, struct peer **peer_index_ptr)
 	// 1: IPv6 / 16 bits
 	// 2: IPv4 / 32 bits
 	// 3: IPv6 / 32 bits
-	for (int i = 0; i < header.peer_count; i++) {
-		//print_hex(input, index, 48);
+	for (int i = 0; i < peer_count; i++) {
 		struct peer peer;
 		memset(&peer, 0, sizeof(struct peer));
-		peer.type = input[index++];
+		peer.type = input[index++] & 0x3;
 
 		switch (peer.type) {
 		case 0: {
@@ -415,6 +453,19 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
 }
 
 
+/* rfc8050
+   2 bytes, 4 bytes, 4 bytes, 2 bytes:
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |    Peer Index =  15           |    Originated ...
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |    ... time                   |    Path ...
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+           ... identifier             | Attribute Length              |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+*/
+
 /*
    2 bytes, 4 bytes, 2 bytes:
        0                   1                   2                   3
@@ -425,27 +476,57 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
            ... time                   | Attribute Length              |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_entry(struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char *net, uint16_t pfxlen)
+int parse_entry(bool addpath, struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char *net, uint16_t pfxlen)
 {
 	struct table_dump_v2_ipv6_unicast_header header;
 	uint16_t index = 0;
+	int sizeof_header;
 
-	memcpy(&header, input, sizeof(header));
-	header.attr_len = htons(header.attr_len);
+	if (addpath) {
+		struct table_dump_v2_ipv6_unicast_addpath_header header_tmp;
 
-	index += sizeof(header);
+		memcpy(&header_tmp, input, sizeof(header_tmp));
+		header_tmp.attr_len = htons(header_tmp.attr_len);
 
-	header.peer_idx = htons(header.peer_idx);
-	header.orig_ts  = htonl(header.orig_ts);
+		index += sizeof(header_tmp);
 
-	if (debug) {
-		printf("\n--- TABLE_DUMP_V2 IPv6 UNICAST ENTRY HEADER ---\n");
-		print_hex(&header, 0, sizeof(header));
-		printf(" peer_index:%u\n", header.peer_idx);
-		printf(" orig_ts: %u\n",   header.orig_ts);
-		printf(" attr_len: %lu + %u\n", sizeof(header), header.attr_len);
+		header_tmp.peer_idx = htons(header_tmp.peer_idx);
+		header_tmp.orig_ts  = htonl(header_tmp.orig_ts);
+
+		if (debug) {
+			printf("\n--- TABLE_DUMP_V2 IPv6 UNICAST ENTRY HEADER ---\n");
+			print_hex(&header_tmp, 0, sizeof(header_tmp));
+			printf(" peer_index:%u\n", header_tmp.peer_idx);
+			printf(" orig_ts: %u\n",   header_tmp.orig_ts);
+			printf(" path_id: %u\n",   header_tmp.path_id);
+			printf(" attr_len: %lu + %u\n", sizeof(header_tmp), header_tmp.attr_len);
+		}
+
+		header.peer_idx = header_tmp.peer_idx;
+		header.orig_ts  = header_tmp.orig_ts;
+		header.attr_len = header_tmp.attr_len;
+
+		sizeof_header = sizeof(header_tmp);
 	}
+	else {
+		memcpy(&header, input, sizeof(header));
+		header.attr_len = htons(header.attr_len);
 
+		index += sizeof(header);
+
+		header.peer_idx = htons(header.peer_idx);
+		header.orig_ts  = htonl(header.orig_ts);
+
+		if (debug) {
+			printf("\n--- TABLE_DUMP_V2 IPv6 UNICAST ENTRY HEADER ---\n");
+			print_hex(&header, 0, sizeof(header));
+			printf(" peer_index:%u\n", header.peer_idx);
+			printf(" orig_ts: %u\n",   header.orig_ts);
+			printf(" attr_len: %lu + %u\n", sizeof(header), header.attr_len);
+		}
+
+		sizeof_header = sizeof(header);
+	}
 
 	/* Common entries */
 	uint16_t mask = BGP_PATH_ATTR_ORIGIN_MASK |
@@ -472,8 +553,7 @@ int parse_entry(struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char 
 	enum origin origin = ORIGIN_UNKNOWN;
 	uint32_t exitdisc = 0;
 
-	/* parse BGP attributes */
-	while (index < sizeof(header) + header.attr_len) {
+	while (index < sizeof_header + header.attr_len) {
 		struct bgp_attr_header attr_header;
 		memcpy(&attr_header, input+index, sizeof(attr_header));
 
@@ -574,7 +654,7 @@ int parse_entry(struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char 
 			break;
 		}
 		case BGP_PATH_ATTR_AS4_AGGREGATOR: {
-			fprintf(stderr, "WARN: I've found an AS4_AGGREGATOR attribute\n");
+			printf("Unhandled AS4_AGGREGATOR attribute\n");
 
 			break;
 		}
@@ -582,12 +662,13 @@ int parse_entry(struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char 
 		case BGP_PATH_ATTR_COMMUNITY: {
 			int rc = parse_bgp_path_attr_community(communities_buffer, buf_len, input+index, attr_header.len);
 			if (rc != attr_header.len) {
-				fprintf(stderr, "COMMUNITY attribute incorrect length: parsed %u, expected %u\n",
+				printf("BGP_PATH_ATTR_COMMUNITY attribute incorrect length: parsed %u, expected %u\n",
 					rc, attr_header.len);
 			}
 			break;
 		}
 		case BGP_PATH_ATTR_MP_REACH_NLRI: {
+			printf("Unhandled MP_REACH_NLRI\n");
 //			int rc = parse_bgp_path_attr_mp_reach_nlr
 //			if (rc != attr_header.len) {
 //				printf("MP_REACH_NLRI attribute incorrect length: parsed %u, expected %u\n",
@@ -596,6 +677,10 @@ int parse_entry(struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char 
 //					rc, attr_header.len);
 //			}
 //			//mask -= BGP_PATH_ATTR_MP_REACH_NLRI_MASK;
+			break;
+		}
+		case BGP_PATH_ATTR_LARGE_COMMUNITY: {
+			printf("Not yet parsing large community\n");
 			break;
 		}
 		default: {
@@ -618,8 +703,8 @@ int parse_entry(struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char 
 		strlen(agg_nag) ? agg_nag : "NAG",
 		agg_buffer);
 
-	if (index != sizeof(header) + header.attr_len) {
-		printf("Warning: bad length detected in IPv6 unicast entry: %u != %u\n",
+	if (index != sizeof_header + header.attr_len) {
+		printf("Error: Bad length detected in IPv6 unicast entry: %u != %u\n",
 			index, header.attr_len);
 		exit(EXIT_FAILURE);
 	}
@@ -642,7 +727,7 @@ int parse_entry(struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char 
             ....       |    Entry Count                |
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_ipvN_unicast(struct peer *peer_index, uint8_t *input, uint32_t mrt_timestamp, int family)
+int parse_ipvN_unicast(bool addpath, struct peer *peer_index, uint8_t *input, uint32_t mrt_timestamp, int family)
 {
 	int index = 0;
 
@@ -659,14 +744,14 @@ int parse_ipvN_unicast(struct peer *peer_index, uint8_t *input, uint32_t mrt_tim
 	int tmp = pfx_len;
 	while (tmp > 0) {num_bytes++; tmp-=8;}
 
-	if (family == TABLE_DUMP_V2_RIB_IPV6_UNICAST) {
+	if (family == TABLE_DUMP_V2_RIB_IPV6_UNICAST || family == TABLE_DUMP_V2_RIB_IPV6_UNICAST_ADDPATH) {
 		struct in6_addr addr;
 		memset(&addr, 0, sizeof(struct in6_addr));
 		memcpy(&addr, input+index, num_bytes);
 		memset(out_str, 0, INET6_ADDRSTRLEN);
 		inet_ntop(AF_INET6, &addr, out_str, INET6_ADDRSTRLEN);
 	}
-	else if (family == TABLE_DUMP_V2_RIB_IPV4_UNICAST) {
+	else if (family == TABLE_DUMP_V2_RIB_IPV4_UNICAST || family == TABLE_DUMP_V2_RIB_IPV4_UNICAST_ADDPATH) {
 		struct sockaddr_in addr;
 		memset(&addr, 0, sizeof(struct sockaddr_in));
 		memcpy(&addr.sin_addr, input+index, num_bytes);
@@ -682,7 +767,7 @@ int parse_ipvN_unicast(struct peer *peer_index, uint8_t *input, uint32_t mrt_tim
 
 	uint16_t i;
 	for (i = 0; i < entries_count; i++) {
-		index += parse_entry(peer_index, mrt_timestamp, input+index, out_str, pfx_len);
+		index += parse_entry(addpath, peer_index, mrt_timestamp, input+index, out_str, pfx_len);
 	}
 
 	return index;
@@ -973,7 +1058,7 @@ int main(int argc, char *argv[])
 				if (parsev4) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
 					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(peer_index, input, header.ts, header.subtype);
+					uint32_t bytes_parsed = parse_ipvN_unicast(false, peer_index, input, header.ts, header.subtype);
 					free(input);
 
 					if (bytes_parsed != header.length) {
@@ -991,14 +1076,50 @@ int main(int argc, char *argv[])
 				if (parsev6) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
 					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(peer_index, input, header.ts, header.subtype);
+					uint32_t bytes_parsed = parse_ipvN_unicast(false, peer_index, input, header.ts, header.subtype);
 					free(input);
 
-//					if (bytes_parsed != header.length) {
-//						printf("Error: parsed %u bytes from a header length %u\n",
-//							bytes_parsed, header.length);
-//						exit(EXIT_FAILURE);
-//					}
+					if (bytes_parsed != header.length) {
+						printf("Error: parsed %u bytes from a header length %u\n",
+							bytes_parsed, header.length);
+						exit(EXIT_FAILURE);
+					}
+				}
+				else {
+					gzseek(file, header.length, SEEK_CUR);
+				}
+				break;
+			}
+			case TABLE_DUMP_V2_RIB_IPV4_UNICAST_ADDPATH: {
+				if (parsev4) {
+					uint8_t *input = (uint8_t *)malloc(header.length);
+					gzread(file, input, header.length);
+					uint32_t bytes_parsed = parse_ipvN_unicast(true, peer_index, input, header.ts, header.subtype);
+					free(input);
+
+					if (bytes_parsed != header.length) {
+						printf("Error: parsed %u bytes from a header length %u\n",
+							bytes_parsed, header.length);
+						exit(EXIT_FAILURE);
+					}
+				}
+				else {
+					gzseek(file, header.length, SEEK_CUR);
+				}
+				break;
+			}
+			case TABLE_DUMP_V2_RIB_IPV6_UNICAST_ADDPATH: {
+				if (parsev6) {
+					uint8_t *input = (uint8_t *)malloc(header.length);
+					gzread(file, input, header.length);
+					uint32_t bytes_parsed = parse_ipvN_unicast(true, peer_index, input, header.ts, header.subtype);
+					free(input);
+
+					if (bytes_parsed != header.length) {
+						printf("Error: parsed %u bytes from a header length %u\n",
+							bytes_parsed, header.length);
+						exit(EXIT_FAILURE);
+					}
 				}
 				else {
 					gzseek(file, header.length, SEEK_CUR);
@@ -1007,7 +1128,7 @@ int main(int argc, char *argv[])
 			}
 			default: {
 				if (debug) {
-					fprintf(stderr, "Unhandled subtype %u\n", header.subtype);
+					printf("Unhandled MRT_TABLE_DUMP_V2 subtype %u\n", header.subtype);
 				}
 				gzseek(file, header.length, SEEK_CUR);
 			}
@@ -1021,10 +1142,10 @@ int main(int argc, char *argv[])
 				gzread(file, input, header.length);
 				uint32_t bytes_parsed = parse_bgp4mp_state_change(input, header.subtype);
 				free(input);
-				//gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_MESSAGE: {
+				printf("Unhandled BGP4MP_MESSAGE\n");
 				gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
@@ -1033,18 +1154,27 @@ int main(int argc, char *argv[])
 				gzread(file, input, header.length);
 				uint32_t bytes_parsed = parse_bgp4mp_message_as4(input, header.subtype);
 				free(input);
-				//gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_STATE_CHANGE_AS4: {
+				printf("Unhandled BGP4MP_STATE_CHANGE_AS4\n");
 				gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_MESSAGE_LOCAL: {
+				printf("Unhandled BGP4MP_MESSAGE_LOCAL\n");
 				gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_MESSAGE_AS4_LOCAL: {
+				printf("Unhandled BGP4MP_MESSAGE_AS4_LOCAL\n");
+				gzseek(file, header.length, SEEK_CUR);
+				break;
+			}
+			default: {
+				if (debug) {
+					printf("Unhandled BGP4MP subtype %u\n", header.subtype);
+				}
 				gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
