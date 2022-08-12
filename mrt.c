@@ -476,7 +476,7 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
            ... time                   | Attribute Length              |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_entry(bool addpath, struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, char *net, uint16_t pfxlen)
+int parse_entry(bool addpath, struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, int input_len, char *net, uint16_t pfxlen)
 {
 	struct table_dump_v2_ipv6_unicast_header header;
 	uint16_t index = 0;
@@ -555,18 +555,24 @@ int parse_entry(bool addpath, struct peer *peer, uint32_t mrt_timestamp, uint8_t
 
 	while (index < sizeof_header + header.attr_len) {
 		struct bgp_attr_header attr_header;
-		memcpy(&attr_header, input+index, sizeof(attr_header));
+
+		attr_header.flags = input[index];
+		index++;
+		attr_header.code  = input[index];
+		index++;
 
 		// Bit hacky: header field isn't always the same length.
-		index += sizeof(attr_header.flags) + sizeof(attr_header.code);
+		//   uint8_t flags;
+		//   uint8_t code;
+		//   uint8_t or uint16_t len
 		if (attr_header.flags & 0x10) {
-			memcpy(&attr_header.len, input+index, sizeof(attr_header.len));
-			index += sizeof(attr_header.len);
-			attr_header.len = ntohs(attr_header.len);
+			uint16_t *len = (uint16_t *)(input + index);
+			attr_header.len = ntohs(*len);
+			index += 2;
 		}
 		else {
-			attr_header.len = input[index];
-			index += sizeof(input[index]);
+			attr_header.len = *(input + index);
+			index += 1;
 		}
 
 		if (debug) {
@@ -727,7 +733,7 @@ int parse_entry(bool addpath, struct peer *peer, uint32_t mrt_timestamp, uint8_t
             ....       |    Entry Count                |
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_ipvN_unicast(bool addpath, struct peer *peer_index, uint8_t *input, uint32_t mrt_timestamp, int family)
+int parse_ipvN_unicast(bool addpath, struct peer *peer_index, uint8_t *input, int input_len, uint32_t mrt_timestamp, int family)
 {
 	int index = 0;
 
@@ -767,7 +773,7 @@ int parse_ipvN_unicast(bool addpath, struct peer *peer_index, uint8_t *input, ui
 
 	uint16_t i;
 	for (i = 0; i < entries_count; i++) {
-		index += parse_entry(addpath, peer_index, mrt_timestamp, input+index, out_str, pfx_len);
+		index += parse_entry(addpath, peer_index, mrt_timestamp, input+index, input_len-index, out_str, pfx_len);
 	}
 
 	return index;
@@ -1058,7 +1064,7 @@ int main(int argc, char *argv[])
 				if (parsev4) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
 					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(false, peer_index, input, header.ts, header.subtype);
+					uint32_t bytes_parsed = parse_ipvN_unicast(false, peer_index, input, header.length, header.ts, header.subtype);
 					free(input);
 
 					if (bytes_parsed != header.length) {
@@ -1076,7 +1082,7 @@ int main(int argc, char *argv[])
 				if (parsev6) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
 					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(false, peer_index, input, header.ts, header.subtype);
+					uint32_t bytes_parsed = parse_ipvN_unicast(false, peer_index, input, header.length, header.ts, header.subtype);
 					free(input);
 
 					if (bytes_parsed != header.length) {
@@ -1094,7 +1100,7 @@ int main(int argc, char *argv[])
 				if (parsev4) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
 					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(true, peer_index, input, header.ts, header.subtype);
+					uint32_t bytes_parsed = parse_ipvN_unicast(true, peer_index, input, header.length, header.ts, header.subtype);
 					free(input);
 
 					if (bytes_parsed != header.length) {
@@ -1112,7 +1118,7 @@ int main(int argc, char *argv[])
 				if (parsev6) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
 					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(true, peer_index, input, header.ts, header.subtype);
+					uint32_t bytes_parsed = parse_ipvN_unicast(true, peer_index, input, header.length, header.ts, header.subtype);
 					free(input);
 
 					if (bytes_parsed != header.length) {

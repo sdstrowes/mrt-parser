@@ -139,12 +139,14 @@ struct table_dump_v2_ipv6_unicast_addpath_header
 	uint16_t attr_len;
 } __attribute__((packed));
 
+// this is just a convenience struct; the header itself can have a 1 byte or a
+// 2 byte length depending on the other variables
 struct bgp_attr_header
 {
 	uint8_t  flags;
 	uint8_t  code;
-	uint16_t len;
-} __attribute__((packed));
+	uint16_t  len;
+};
 
 struct attr_as_path_header
 {
