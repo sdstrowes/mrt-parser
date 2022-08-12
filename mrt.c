@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <getopt.h>
 #include <libgen.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -966,6 +967,16 @@ int parse_bgp4mp_state_change(uint8_t *input, int family)
 	return index;
 }
 
+
+
+static volatile sig_atomic_t running = 1;
+
+void interrupt_handler(int _)
+{
+	(void)_;
+	running = 0;
+}
+
 void print_help(char *name)
 {
 	printf("%s: ploughs through MRT files\n", basename(name));
@@ -980,6 +991,8 @@ void print_help(char *name)
 
 int main(int argc, char *argv[])
 {
+	signal(SIGINT, interrupt_handler);
+
 	gzFile file;
 	debug  = false;
 	bool parsev4 = false;
@@ -1026,7 +1039,7 @@ int main(int argc, char *argv[])
 	}
 
 	struct mrt_header header;
-	while (gzread(file, &header, sizeof(struct mrt_header)) == sizeof(struct mrt_header)) {
+	while (running && gzread(file, &header, sizeof(struct mrt_header)) == sizeof(struct mrt_header)) {
 		header.ts      = ntohl(header.ts);
 		header.type    = ntohs(header.type);
 		header.subtype = ntohs(header.subtype);
@@ -1192,6 +1205,10 @@ int main(int argc, char *argv[])
 			}
 		}
 		}
+	}
+	if (peer_index != NULL) {
+		free(peer_index);
+		peer_index = NULL;
 	}
 	gzclose(file);
 
