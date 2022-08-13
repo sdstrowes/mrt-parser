@@ -261,7 +261,6 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 	int remaining    = buffer_len;
 
 	struct nlri outputs[256];
-	int n = 0;
 	memset(outputs, 0, sizeof (struct nlri)*256);
 
 	while (index < len) {
@@ -372,6 +371,10 @@ int parse_bgp_path_attr_community(char *buffer, int buffer_len, uint8_t *input, 
 
 int parse_bgp_path_attr_nexthop(char *buffer, int remaining, uint8_t *input, int len)
 {
+	if (remaining < len) {
+		fprintf(stderr, "parse_bgp_path_attr_nexthop: remaining (%u) < len (%u)\n", remaining, len);
+		return -1;
+	}
 	if (len == 4) {
 		inet_ntop(AF_INET, input, buffer, INET_ADDRSTRLEN);
 	}
@@ -626,6 +629,7 @@ int parse_entry(bool addpath, struct peer *peer, uint32_t mrt_timestamp, uint8_t
 			if (rc != attr_header.len) {
 				fprintf(stderr, "NEXTHOP attribute incorrect length: parsed %u, expected %u\n",
 					rc, attr_header.len);
+				return -1;
 			}
 			break;
 		}
@@ -774,7 +778,12 @@ int parse_ipvN_unicast(bool addpath, struct peer *peer_index, uint8_t *input, in
 
 	uint16_t i;
 	for (i = 0; i < entries_count; i++) {
-		index += parse_entry(addpath, peer_index, mrt_timestamp, input+index, input_len-index, out_str, pfx_len);
+		int rc = parse_entry(addpath, peer_index, mrt_timestamp, input+index, input_len-index, out_str, pfx_len);
+		if (rc == -1) {
+			fprintf(stderr, "parse_entry() failed\n");
+			return -1;
+		}
+		index += rc;
 	}
 
 	return index;
@@ -1195,9 +1204,9 @@ int main(int argc, char *argv[])
 					printf("Unhandled BGP4MP subtype %u\n", header.subtype);
 				}
 				gzseek(file, header.length, SEEK_CUR);
-				break;
 			}
 			}
+			break;
 		}
 		default: {
 			if (debug) {
