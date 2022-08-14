@@ -1,6 +1,78 @@
 #ifndef __MRT_H_
 #define __MRT_H_
 
+#include <arpa/inet.h>
+#include <stdint.h>
+
+/*
+rfc4760
+        +---------------------------------------------------------+
+        | Address Family Identifier (2 octets)                    |
+        +---------------------------------------------------------+
+        | Subsequent Address Family Identifier (1 octet)          |
+        +---------------------------------------------------------+
+        | Length of Next Hop Network Address (1 octet)            |
+        +---------------------------------------------------------+
+        | Network Address of Next Hop (variable)                  |
+        +---------------------------------------------------------+
+        | Reserved (1 octet)                                      |
+        +---------------------------------------------------------+
+        | Network Layer Reachability Information (variable)       |
+        +---------------------------------------------------------+
+*/
+
+struct nlri
+{
+	uint32_t net;
+	uint16_t masklen;
+};
+
+
+
+/* rfc 6396, section 4.3.1
+        0                   1                   2                   3
+        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                      Collector BGP ID                         |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |       View Name Length        |     View Name (variable)      |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |          Peer Count           |    Peer Entries (variable)
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                    Figure 5: PEER_INDEX_TABLE Subtype
+*/
+struct peer_index_header
+{
+	uint32_t collector_bgp_id;
+	uint16_t view_name_length;
+} __attribute__((packed));
+
+/* rfc 6396, section 4.3.1
+
+        0                   1                   2                   3
+        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |   Peer Type   |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                         Peer BGP ID                           |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                   Peer IP Address (variable)                  |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                        Peer AS (variable)                     |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                          Figure 6: Peer Entries
+*/
+struct peer
+{
+	uint8_t  type;
+	uint32_t bgp_id;
+	char     ip_addr[INET6_ADDRSTRLEN];
+	uint32_t asn;
+} __attribute__((packed));
+
+
 /*
 From RFC 6396, Appendix A:
 
