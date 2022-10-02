@@ -2,6 +2,8 @@
 #include <errno.h>
 #include <getopt.h>
 #include <libgen.h>
+#include <pthread.h>
+#include <sys/queue.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -346,11 +348,6 @@ int parse_bgp4mp_state_change(uint8_t *input, int family)
 
 static volatile sig_atomic_t running = 1;
 
-void interrupt_handler(int _)
-{
-	(void)_;
-	running = 0;
-}
 
 void print_help(char *name)
 {
@@ -363,6 +360,97 @@ void print_help(char *name)
 	printf("	-6		: Print only lines with IPv6 announcements.\n");
 }
 
+struct mrtqueue_entry {
+	bool   addpath;
+	struct peer *peer_index;
+	struct mrt_header *header;
+	uint8_t *data;
+	uint32_t data_length;
+	STAILQ_ENTRY(mrtqueue_entry) entries;
+};
+
+
+
+
+pthread_cond_t  input_waiting = PTHREAD_COND_INITIALIZER; 
+pthread_cond_t  work_waiting = PTHREAD_COND_INITIALIZER; 
+pthread_mutex_t queue_mutex  = PTHREAD_MUTEX_INITIALIZER;
+STAILQ_HEAD(mrtqueue_stailq, mrtqueue_entry) mrtqueue;
+uint32_t queue_length = 0;
+
+void interrupt_handler(int _)
+{
+	(void)_;
+	running = 0;
+}
+
+static void *handle_records(void *data)
+{
+	struct mrtqueue_stailq *mrtqueuep = (struct mrtqueue_stailq *)data;
+
+	while (running) {
+		printf("> looping in thread\n");
+		pthread_mutex_lock(&queue_mutex);
+
+		if (queue_length < 1) {
+			pthread_cond_signal(&input_waiting); 
+		}
+		while (STAILQ_EMPTY(mrtqueuep)) {
+			printf("MUTEX | waiting\n");
+			pthread_cond_wait(&work_waiting, &queue_mutex);
+			//printf("> thread unlocked\n");
+		}
+
+		// pull something from the queue
+		struct mrtqueue_entry *e        = STAILQ_FIRST(&mrtqueue);
+		STAILQ_REMOVE_HEAD(&mrtqueue, entries);
+		queue_length--;
+
+		printf("> Pulled:    %p (head:%p, length: %u) data:%p\n", e, e->header, e->header->length, e->data);
+		printf("> queue length: %u\n", queue_length);
+
+		pthread_mutex_unlock(&queue_mutex);
+
+
+		// process
+
+		uint32_t bytes_parsed = parse_ipvN_unicast(e->addpath, e->peer_index, e->data, e->data_length, e->header->ts, e->header->subtype);
+
+		if (bytes_parsed != e->header->length) {
+			printf("Error: parsed %u bytes from a header length %u\n",
+				bytes_parsed, e->header->length);
+			exit(EXIT_FAILURE);
+		}
+
+		free(e->header);
+		free(e->data);
+		free(e);
+		printf("> end of loop\n");
+	}
+
+	printf("> exiting thread\n");
+
+	return NULL;
+}
+
+//decrement_count()
+//{
+//	pthread_mutex_lock(&count_lock); 
+//	while (count == 0) 
+//		pthread_cond_wait(&count_nonzero, &count_lock); 
+//	count = count - 1; 
+//	pthread_mutex_unlock(&count_lock); 
+//} 
+//
+//increment_count()
+//{
+//	pthread_mutex_lock(&count_lock); 
+//	if (STAILQ_EMPTY(mrtqueuep)) {
+//		pthread_cond_signal(&count_nonzero); 
+//	}
+//	count = count + 1;
+//	pthread_mutex_unlock(&count_lock); 
+//}
 
 int main(int argc, char *argv[])
 {
@@ -413,36 +501,118 @@ int main(int argc, char *argv[])
 		parsev6 = true;
 	}
 
-	struct mrt_header header;
-	while (running && gzread(file, &header, sizeof(struct mrt_header)) == sizeof(struct mrt_header)) {
-		header.ts      = ntohl(header.ts);
-		header.type    = ntohs(header.type);
-		header.subtype = ntohs(header.subtype);
-		header.length  = ntohl(header.length);
+
+	STAILQ_INIT(&mrtqueue);
+
+	pthread_mutex_init(&queue_mutex, NULL);
+	const int n_threads = 1;
+	pthread_t thread[n_threads];
+
+	uint32_t t;
+	for (t = 0; t < n_threads; t++) {
+		printf("Creating thread %u\n", t);
+		pthread_create(&thread[t], NULL, &handle_records, &mrtqueue);
+
+	}
+
+
+
+/* ------------------------------------------------------------ */
+
+
+
+
+//	SLIST_HEAD(slisthead, entry) head = SLIST_HEAD_INITIALIZER(head);
+//	struct slisthead *headp;			 /*	Singly-linked List head. */
+//	struct entry {
+//		...
+//		SLIST_ENTRY(entry) entries;	 /*	Singly-linked List. */
+//		...
+//	} *n1, *n2, *n3, *np;
+
+//	SLIST_INIT(&head);				 /*	Initialize the list. */
+
+//	n1 = malloc(sizeof(struct entry));		 /*	Insert at the head. */
+//	SLIST_INSERT_HEAD(&head, n1, entries);
+
+//	n2 = malloc(sizeof(struct entry));		 /*	Insert after. */
+//	SLIST_INSERT_AFTER(n1, n2, entries);
+
+//	SLIST_REMOVE(&head, n2, entry, entries);/*	Deletion. */
+//	free(n2);
+//
+//	n3 = SLIST_FIRST(&head);
+//	SLIST_REMOVE_HEAD(&head, entries);		 /*	Deletion from the head.	*/
+//	free(n3);
+//						 /*	Forward	traversal. */
+//	SLIST_FOREACH(np, &head, entries)
+//		np-> ...
+//						 /*	Safe forward traversal.	*/
+//	SLIST_FOREACH_SAFE(np, &head, entries, np_temp) {
+//		np->do_stuff();
+//		...
+//		SLIST_REMOVE(&head, np, entry, entries);
+//		free(np);
+//	}
+//
+//	while (!SLIST_EMPTY(&head)) {		 /*	List Deletion. */
+//		n1	= SLIST_FIRST(&head);
+//		SLIST_REMOVE_HEAD(&head, entries);
+//		free(n1);
+//	}
+
+/* ------------------------------------------------------------ */
+
+	//struct mrt_header header;
+	while (running) {
+		struct mrt_header *header = (struct mrt_header *)malloc(sizeof(struct mrt_header));
+		int rc = gzread(file, header, sizeof(struct mrt_header));
+		if (rc == -1) {
+			printf("Read failed: %s\n", strerror(errno));
+			running = false;
+			continue;
+		}
+		if (rc == 0) {
+			printf("End of file\n");
+			running = false;
+			continue;
+		}
+		if (rc < sizeof(struct mrt_header)) {
+			printf("Incorrect read length from file\n");
+			running = false;
+			continue;
+		}
+
+		header->ts      = ntohl(header->ts);
+		header->type    = ntohs(header->type);
+		header->subtype = ntohs(header->subtype);
+		header->length  = ntohl(header->length);
 
 		if (debug) {
 			printf("\n--- MRT HEADER ---\n");
 			print_hex(&header, 0, sizeof(header));
-			printf(" ts: %u\n",      header.ts);
-			printf(" type: %u\n",    header.type);
-			printf(" subtype: %u\n", header.subtype);
-			printf(" length: %u\n",  header.length);
+			printf(" ts: %u\n",      header->ts);
+			printf(" type: %u\n",    header->type);
+			printf(" subtype: %u\n", header->subtype);
+			printf(" length: %u\n",  header->length);
 			printf("\n");
 		}
 
-		switch (header.type) {
+		switch (header->type) {
 		case MRT_TABLE_DUMP_V2: {
-			switch (header.subtype) {
+			switch (header->subtype) {
 			case TABLE_DUMP_V2_PEER_INDEX_TABLE: {
 				if (parse_peerindex) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
+					uint8_t *input = (uint8_t *)malloc(header->length);
+					gzread(file, input, header->length);
+
+
 					uint32_t bytes_parsed = parse_peer_index_table(input, &peer_index);
 					free(input);
 
-					if (bytes_parsed != header.length) {
+					if (bytes_parsed != header->length) {
 						printf("Error: parsed %u bytes from a header length %u\n",
-							bytes_parsed, header.length);
+							bytes_parsed, header->length);
 						exit(EXIT_FAILURE);
 					}
 				}
@@ -450,142 +620,268 @@ int main(int argc, char *argv[])
 			}
 			case TABLE_DUMP_V2_RIB_IPV4_UNICAST: {
 				if (parsev4) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(false, peer_index, input, header.length, header.ts, header.subtype);
-					free(input);
+					uint8_t *input = (uint8_t *)malloc(header->length);
+					gzread(file, input, header->length);
+//					uint32_t bytes_parsed = parse_ipvN_unicast(false, peer_index, input, header->length, header->ts, header->subtype);
+//					free(input);
 
-					if (bytes_parsed != header.length) {
-						printf("Error: parsed %u bytes from a header length %u\n",
-							bytes_parsed, header.length);
-						exit(EXIT_FAILURE);
+//					if (bytes_parsed != header->length) {
+//						printf("Error: parsed %u bytes from a header length %u\n",
+//							bytes_parsed, header->length);
+//						exit(EXIT_FAILURE);
+//					}
+
+
+					// -------------------------------
+
+
+					struct mrtqueue_entry *entry = (struct mrtqueue_entry *)malloc(sizeof(struct mrtqueue_entry));
+					entry->addpath = false;
+					entry->header = header;
+					entry->data  = input;
+					entry->data_length = header->length;
+					entry->peer_index  = peer_index;
+
+
+					printf("MUTEX > getting lock\n");
+					pthread_mutex_lock(&queue_mutex); 
+					while (queue_length >= 1) { //STAILQ_EMPTY(mrtqueuep)) {
+						printf("MUTEX > waiting\n");
+						pthread_cond_wait(&input_waiting, &queue_mutex);
 					}
+					if (STAILQ_EMPTY(&mrtqueue)) {
+						printf("MUTEX > signalling\n");
+						pthread_cond_signal(&work_waiting); 
+					}
+					STAILQ_INSERT_TAIL(&mrtqueue, entry, entries);
+					queue_length++;
+					printf("| Inserting1: %p (header:%p, length %u) data:%p)\n", entry, entry->header, entry->header->length, entry->data);
+					printf("| Queue length: %u\n", queue_length);
+					printf("MUTEX > releasing lock\n");
+					pthread_mutex_unlock(&queue_mutex); 
+
+
+
+
+					// -------------------------------
+//					struct mrtqueue_entry *entry = (struct mrtqueue_entry *)malloc(sizeof(struct mrtqueue_entry));
+//					//uint8_t *test = (uint8_t *)malloc(tmp);
+//					//memcpy(test, &src, tmp);
+//
+//					entry->i      = i;
+//					memcpy(&entry->header, &header, sizeof(struct mrt_header));
+//					entry->header = header;
+//					entry->data  = input;
+//					entry->data_length = header->length;
+//
+//
+//					i++;
+//
+//					STAILQ_INSERT_TAIL(&mrtqueue, entry, entries);
 				}
 				else {
-					gzseek(file, header.length, SEEK_CUR);
+					gzseek(file, header->length, SEEK_CUR);
 				}
 				break;
 			}
 			case TABLE_DUMP_V2_RIB_IPV6_UNICAST: {
 				if (parsev6) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(false, peer_index, input, header.length, header.ts, header.subtype);
-					free(input);
+					uint8_t *input = (uint8_t *)malloc(header->length);
+					gzread(file, input, header->length);
 
-					if (bytes_parsed != header.length) {
-						printf("Error: parsed %u bytes from a header length %u\n",
-							bytes_parsed, header.length);
-						exit(EXIT_FAILURE);
+					struct mrtqueue_entry *entry = (struct mrtqueue_entry *)malloc(sizeof(struct mrtqueue_entry));
+					entry->addpath = false;
+					entry->header = header;
+					entry->data  = input;
+					entry->data_length = header->length;
+					entry->peer_index  = peer_index;
+
+
+					printf("MUTEX | getting lock\n");
+					pthread_mutex_lock(&queue_mutex); 
+					while (queue_length >= 1) { //STAILQ_EMPTY(mrtqueuep)) {
+						printf("MUTEX | waiting\n");
+						pthread_cond_wait(&input_waiting, &queue_mutex);
 					}
+					if (STAILQ_EMPTY(&mrtqueue)) {
+						printf("MUTEX | signalling\n");
+						pthread_cond_signal(&work_waiting); 
+					}
+					STAILQ_INSERT_TAIL(&mrtqueue, entry, entries);
+					queue_length++;
+					printf("| Inserting2: %p (header:%p, length %u) data:%p)\n", entry, entry->header, entry->header->length, entry->data);
+					printf("| Queue length: %u\n", queue_length);
+					printf("MUTEX | releasing lock\n");
+					pthread_mutex_unlock(&queue_mutex); 
+
+//
+//
+//					uint32_t bytes_parsed = parse_ipvN_unicast(false, peer_index, input, header->length, header->ts, header->subtype);
+//					free(input);
+//
+//					if (bytes_parsed != header->length) {
+//						printf("Error: parsed %u bytes from a header length %u\n",
+//							bytes_parsed, header->length);
+//						exit(EXIT_FAILURE);
+//					}
 				}
 				else {
-					gzseek(file, header.length, SEEK_CUR);
+					gzseek(file, header->length, SEEK_CUR);
 				}
 				break;
 			}
 			case TABLE_DUMP_V2_RIB_IPV4_UNICAST_ADDPATH: {
 				if (parsev4) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(true, peer_index, input, header.length, header.ts, header.subtype);
-					free(input);
+					uint8_t *input = (uint8_t *)malloc(header->length);
+					gzread(file, input, header->length);
+					struct mrtqueue_entry *entry = (struct mrtqueue_entry *)malloc(sizeof(struct mrtqueue_entry));
+					entry->addpath = true;
+					entry->header = header;
+					entry->data  = input;
+					entry->data_length = header->length;
+					entry->peer_index  = peer_index;
 
-					if (bytes_parsed != header.length) {
-						printf("Error: parsed %u bytes from a header length %u\n",
-							bytes_parsed, header.length);
-						exit(EXIT_FAILURE);
+
+					printf("MUTEX | getting lock\n");
+					pthread_mutex_lock(&queue_mutex); 
+					while (queue_length >= 1) { //STAILQ_EMPTY(mrtqueuep)) {
+						printf("MUTEX | waiting\n");
+						pthread_cond_wait(&input_waiting, &queue_mutex);
 					}
+					if (STAILQ_EMPTY(&mrtqueue)) {
+						printf("MUTEX | signalling\n");
+						pthread_cond_signal(&work_waiting); 
+					}
+					STAILQ_INSERT_TAIL(&mrtqueue, entry, entries);
+					queue_length++;
+					printf("| Inserting3: %p (header:%p, length %u) data:%p)\n", entry, entry->header, entry->header->length, entry->data);
+					printf("| Queue length: %u\n", queue_length);
+					printf("MUTEX | releasing lock\n");
+					pthread_mutex_unlock(&queue_mutex); 
 				}
 				else {
-					gzseek(file, header.length, SEEK_CUR);
+					gzseek(file, header->length, SEEK_CUR);
 				}
 				break;
 			}
 			case TABLE_DUMP_V2_RIB_IPV6_UNICAST_ADDPATH: {
 				if (parsev6) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(true, peer_index, input, header.length, header.ts, header.subtype);
-					free(input);
+					uint8_t *input = (uint8_t *)malloc(header->length);
+					gzread(file, input, header->length);
+					struct mrtqueue_entry *entry = (struct mrtqueue_entry *)malloc(sizeof(struct mrtqueue_entry));
+					entry->addpath = true;
+					entry->header = header;
+					entry->data  = input;
+					entry->data_length = header->length;
+					entry->peer_index  = peer_index;
 
-					if (bytes_parsed != header.length) {
-						printf("Error: parsed %u bytes from a header length %u\n",
-							bytes_parsed, header.length);
-						exit(EXIT_FAILURE);
+
+					printf("MUTEX | getting lock\n");
+					pthread_mutex_lock(&queue_mutex); 
+					while (queue_length >= 1) { //STAILQ_EMPTY(mrtqueuep)) {
+						printf("MUTEX | waiting\n");
+						pthread_cond_wait(&input_waiting, &queue_mutex);
 					}
+					if (STAILQ_EMPTY(&mrtqueue)) {
+						printf("MUTEX | signalling\n");
+						pthread_cond_signal(&work_waiting); 
+					}
+					STAILQ_INSERT_TAIL(&mrtqueue, entry, entries);
+					queue_length++;
+					printf("| Inserting4: %p (header:%p, length %u) data:%p)\n", entry, entry->header, entry->header->length, entry->data);
+					printf("| Queue length: %u\n", queue_length);
+					printf("MUTEX | releasing lock\n");
+					pthread_mutex_unlock(&queue_mutex); 
 				}
 				else {
-					gzseek(file, header.length, SEEK_CUR);
+					gzseek(file, header->length, SEEK_CUR);
 				}
 				break;
 			}
 			default: {
 				if (debug) {
-					printf("Unhandled MRT_TABLE_DUMP_V2 subtype %u\n", header.subtype);
+					printf("Unhandled MRT_TABLE_DUMP_V2 subtype %u\n", header->subtype);
 				}
-				gzseek(file, header.length, SEEK_CUR);
+				gzseek(file, header->length, SEEK_CUR);
 			}
 			}
 			break;
 		}
 		case MRT_BGP4MP: {
-			switch (header.subtype) {
+			switch (header->subtype) {
 			case BGP4MP_STATE_CHANGE: {
-				uint8_t *input = (uint8_t *)malloc(header.length);
-				gzread(file, input, header.length);
-				uint32_t bytes_parsed = parse_bgp4mp_state_change(input, header.subtype);
+				uint8_t *input = (uint8_t *)malloc(header->length);
+				gzread(file, input, header->length);
+				uint32_t bytes_parsed = parse_bgp4mp_state_change(input, header->subtype);
 				free(input);
 				break;
 			}
 			case BGP4MP_MESSAGE: {
 				printf("Unhandled BGP4MP_MESSAGE\n");
-				gzseek(file, header.length, SEEK_CUR);
+				gzseek(file, header->length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_MESSAGE_AS4: {
-				uint8_t *input = (uint8_t *)malloc(header.length);
-				gzread(file, input, header.length);
-				uint32_t bytes_parsed = parse_bgp4mp_message_as4(input, header.subtype);
+				uint8_t *input = (uint8_t *)malloc(header->length);
+				gzread(file, input, header->length);
+				uint32_t bytes_parsed = parse_bgp4mp_message_as4(input, header->subtype);
 				free(input);
 				break;
 			}
 			case BGP4MP_STATE_CHANGE_AS4: {
 				printf("Unhandled BGP4MP_STATE_CHANGE_AS4\n");
-				gzseek(file, header.length, SEEK_CUR);
+				gzseek(file, header->length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_MESSAGE_LOCAL: {
 				printf("Unhandled BGP4MP_MESSAGE_LOCAL\n");
-				gzseek(file, header.length, SEEK_CUR);
+				gzseek(file, header->length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_MESSAGE_AS4_LOCAL: {
 				printf("Unhandled BGP4MP_MESSAGE_AS4_LOCAL\n");
-				gzseek(file, header.length, SEEK_CUR);
+				gzseek(file, header->length, SEEK_CUR);
 				break;
 			}
 			default: {
 				if (debug) {
-					printf("Unhandled BGP4MP subtype %u\n", header.subtype);
+					printf("Unhandled BGP4MP subtype %u\n", header->subtype);
 				}
-				gzseek(file, header.length, SEEK_CUR);
+				gzseek(file, header->length, SEEK_CUR);
 			}
 			}
 			break;
 		}
 		default: {
 			if (debug) {
-				fprintf(stderr, "Unhandled type %u\n", header.type);
+				fprintf(stderr, "Unhandled type %u\n", header->type);
 			}
 		}
 		}
 	}
-	if (peer_index != NULL) {
-		free(peer_index);
-		peer_index = NULL;
+
+	running = false;
+	printf("MUTEX | getting lock\n");
+	pthread_mutex_lock(&queue_mutex); 
+	pthread_cond_signal(&work_waiting);
+	printf("MUTEX | releasing lock\n");
+	pthread_mutex_unlock(&queue_mutex); 
+
+
+	for (t = 0; t < n_threads; t++) {
+		printf("| Waiting for thread %u to join\n", t);
+		pthread_join(thread[t], NULL);
+		printf("| Thread %u joined\n", t);
+
 	}
-	gzclose(file);
+	printf("| all joined\n");
+
+//	if (peer_index != NULL) {
+//		free(peer_index);
+//		peer_index = NULL;
+//	}
+//	gzclose(file);
+//	pthread_mutex_destroy(&queue_mutex);
 
 	return EXIT_SUCCESS;
 }
