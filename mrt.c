@@ -358,11 +358,50 @@ void print_help(char *name)
 	printf("Options:\n");
 	printf("	-f <file>	: Input file (required)\n");
 	printf("	-d		: Turns on debugging.\n");
+	printf("	-s		: Output spec: [0x]aspath, [0x]communities\n");
 	printf("	-h		: Print this help then exit.\n");
 	printf("	-4		: Print only lines with IPv4 announcements.\n");
 	printf("	-6		: Print only lines with IPv6 announcements.\n");
 }
 
+void set_spec_default(struct spec *spec)
+{
+	spec->aspath = true;
+	spec->aspath_hex = false;
+	spec->communities = true;
+	spec->communities_hex = false;
+}
+void parse_spec(char *arg, struct spec *spec)
+{
+	char *tmp = strtok(arg, " ,");
+
+
+	while (tmp != NULL) {
+
+		printf("looping\n");
+
+		if (!strcmp(tmp, "aspath")) {
+			spec->aspath = true;
+			spec->aspath_hex = false;
+		}
+		if (!strcmp(tmp, "0xaspath")) {
+			spec->aspath = true;
+			spec->aspath_hex = true;
+		}
+		if (!strcmp(tmp, "communities")) {
+			spec->communities = true;
+			spec->communities_hex = false;
+		}
+		if (!strcmp(tmp, "0xcommunities")) {
+			spec->communities = true;
+			spec->communities_hex = true;
+		}
+
+		tmp = strtok(NULL, " ,");
+	}
+
+	printf("spec: %u %u %u %u\n", spec->aspath, spec->aspath_hex, spec->communities, spec->communities_hex);
+}
 
 int main(int argc, char *argv[])
 {
@@ -374,10 +413,13 @@ int main(int argc, char *argv[])
 	bool parsev6 = false;
 	bool parse_peerindex = true;
 
+	struct spec spec;
+	set_spec_default(&spec);
+
 	struct peer *peer_index = NULL;
 
 	int opt;
-	while ((opt = getopt(argc, argv, "46df:h")) != -1) {
+	while ((opt = getopt(argc, argv, "46df:s:h")) != -1) {
 		switch (opt) {
 		case '4': {
 			parsev4 = true;
@@ -398,6 +440,10 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "Could not open file; error: %s\n", strerror(errno));
 				exit(EXIT_FAILURE);
 			}
+			break;
+		}
+		case 's': {
+			parse_spec(optarg, &spec);
 			break;
 		}
 		default:
@@ -452,7 +498,7 @@ int main(int argc, char *argv[])
 				if (parsev4) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
 					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(false, peer_index, input, header.length, header.ts, header.subtype);
+					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, false, peer_index, input, header.length, header.ts, header.subtype);
 					free(input);
 
 					if (bytes_parsed != header.length) {
@@ -470,7 +516,7 @@ int main(int argc, char *argv[])
 				if (parsev6) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
 					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(false, peer_index, input, header.length, header.ts, header.subtype);
+					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, false, peer_index, input, header.length, header.ts, header.subtype);
 					free(input);
 
 					if (bytes_parsed != header.length) {
@@ -488,7 +534,7 @@ int main(int argc, char *argv[])
 				if (parsev4) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
 					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(true, peer_index, input, header.length, header.ts, header.subtype);
+					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, true, peer_index, input, header.length, header.ts, header.subtype);
 					free(input);
 
 					if (bytes_parsed != header.length) {
@@ -506,7 +552,7 @@ int main(int argc, char *argv[])
 				if (parsev6) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
 					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(true, peer_index, input, header.length, header.ts, header.subtype);
+					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, true, peer_index, input, header.length, header.ts, header.subtype);
 					free(input);
 
 					if (bytes_parsed != header.length) {

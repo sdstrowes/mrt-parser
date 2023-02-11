@@ -3,6 +3,15 @@
 
 #include <arpa/inet.h>
 #include <stdint.h>
+#include <stdbool.h>
+
+struct spec {
+	bool aspath;
+	bool aspath_hex;
+	bool communities;
+	bool communities_hex;
+};
+
 
 /*
 rfc4760

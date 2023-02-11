@@ -113,7 +113,7 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 	return index;
 }
 
-int parse_bgp_path_attr_community(char *buffer, int buffer_len, uint8_t *input, int len)
+int parse_bgp_path_attr_community(char *buffer, int buffer_len, uint8_t *input, int len, bool as_hex)
 {
 	if (len % 4 != 0) {
 		fprintf(stderr, "Malformed community of length %u\n", len);
@@ -133,7 +133,13 @@ int parse_bgp_path_attr_community(char *buffer, int buffer_len, uint8_t *input, 
 		idx += 2;
 
 		if (i != 0) {
-			int rc = snprintf(buffer_idx, remaining, " %u:%u", *a, *b);
+			int rc;
+			if (as_hex) {
+				rc = snprintf(buffer_idx, remaining, " %04x:%04x", *a, *b);
+			}
+			else {
+				rc = snprintf(buffer_idx, remaining, " %u:%u", *a, *b);
+			}
 			if (rc < 0) {
 				printf("ERROR: Cannot write community\n");
 			}
@@ -144,7 +150,13 @@ int parse_bgp_path_attr_community(char *buffer, int buffer_len, uint8_t *input, 
 			remaining  -= rc;
 		}
 		else {
-			int rc = snprintf(buffer_idx, remaining, "%u:%u", *a, *b);
+			int rc;
+			if (as_hex) {
+				rc = snprintf(buffer_idx, remaining, "%04x:%04x", *a, *b);
+			}
+			else {
+				rc = snprintf(buffer_idx, remaining, "%u:%u", *a, *b);
+			}
 			if (rc < 0) {
 				printf("ERROR: Cannot write community\n");
 			}
@@ -186,7 +198,7 @@ int parse_bgp_path_attr_nexthop(char *buffer, int remaining, uint8_t *input, int
       |    type == ASPATH_AS_SE[TQ]   |    Count = num ASNs           |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int len)
+int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int len, bool as_hex)
 {
 	int idx = 0;
 	char *buffer_idx = buffer;
@@ -210,14 +222,24 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
 			while (hop_count < header.count) {
 				asn = (uint32_t *)(input+idx);
 				if (hop_count == 0) {
-					n = sprintf(buffer_idx, " {%u", htonl(*asn));
+					if (as_hex) {
+						n = sprintf(buffer_idx, " {%08x", htonl(*asn));
+					}
+					else {
+						n = sprintf(buffer_idx, " {%u", htonl(*asn));
+					}
 					buffer_idx += n;
 					remaining  -= n;
 					idx += sizeof(uint32_t);
 					hop_count++;
 				}
 				else {
-					n = sprintf(buffer_idx, ",%u", htonl(*asn));
+					if (as_hex) {
+						n = sprintf(buffer_idx, ",%08x", htonl(*asn));
+					}
+					else {
+						n = sprintf(buffer_idx, ",%u", htonl(*asn));
+					}
 					buffer_idx += n;
 					remaining  -= n;
 					idx += sizeof(uint32_t);
@@ -232,10 +254,20 @@ int parse_bgp_path_attr_aspath(char *buffer, int remaining, uint8_t *input, int 
 			while (hop_count < header.count) {
 				asn = (uint32_t *)(input+idx);
 				if (strlen(buffer) > 0) {
-					n = sprintf(buffer_idx, " %u", htonl(*asn));
+					if (as_hex) {
+						n = sprintf(buffer_idx, " %08x", htonl(*asn));
+					}
+					else {
+						n = sprintf(buffer_idx, " %u", htonl(*asn));
+					}
 				}
 				else {
-					n = sprintf(buffer_idx, "%u", htonl(*asn));
+					if (as_hex) {
+						n = sprintf(buffer_idx, "%08x", htonl(*asn));
+					}
+					else {
+						n = sprintf(buffer_idx, "%u", htonl(*asn));
+					}
 				}
 				buffer_idx += n;
 				remaining  -= n;
