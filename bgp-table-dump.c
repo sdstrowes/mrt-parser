@@ -103,6 +103,7 @@ int parse_entry(struct spec *spec, bool addpath, struct peer *peer, uint32_t mrt
 	char *communities_buffer = NULL;
 	char  agg_nag[4];
 	char *agg_buffer = NULL;
+	char *nlri_buffer = NULL;
 
 	agg_nag[0] = '\0';
 
@@ -172,7 +173,7 @@ int parse_entry(struct spec *spec, bool addpath, struct peer *peer, uint32_t mrt
 			if (spec->aspath) {
 				aspath_buffer = (char *)malloc(buf_len);
 				aspath_buffer[0] = '\0';
-				int rc = parse_bgp_path_attr_aspath(aspath_buffer, buf_len, input+index, attr_header.len, spec->aspath_hex);
+				int rc = parse_bgp_path_attr_aspath(&aspath_buffer, buf_len, input+index, attr_header.len, spec->aspath_hex);
 				if (rc != attr_header.len) {
 					fprintf(stderr, "AS_PATH attribute incorrect length: parsed %u, expected %u\n",
 						rc, attr_header.len);
@@ -181,7 +182,11 @@ int parse_entry(struct spec *spec, bool addpath, struct peer *peer, uint32_t mrt
 			break;
 		}
 		case BGP_PATH_ATTR_NEXTHOP: {
-			nexthop_buffer = (char *)malloc(buf_len);
+			nexthop_buffer = (char *)malloc(INET6_ADDRSTRLEN);
+			if (nexthop_buffer == NULL) {
+				fprintf(stderr, "malloc failed\n");
+				exit(1);
+			}
 			nexthop_buffer[0] = '\0';
 			int rc = parse_bgp_path_attr_nexthop(nexthop_buffer, buf_len, input+index, attr_header.len);
 			if (rc != attr_header.len) {
@@ -209,7 +214,16 @@ int parse_entry(struct spec *spec, bool addpath, struct peer *peer, uint32_t mrt
 			break;
 		}
 		case BGP_PATH_ATTR_AGGREGATOR: {
-			//strncpy(agg_nag, "AG", buf_len);
+			//  AGGREGATOR is an optional transitive attribute of length 6.
+			//  The attribute contains the last AS number that formed the
+			//  aggregate route (encoded as 2 octets), followed by the IP
+			//  address of the BGP speaker that formed the aggregate route
+			//  (encoded as 4 octets).
+
+			if (debug) {
+				printf("PATH_ATTR_AGGREGATOR type:%u, length:%u\n", attr_header.code, attr_header.len);
+				print_hex(input+index, 0, 8);
+			}
 
 			uint32_t asn;
 			memcpy(&asn, input+index, 4);
@@ -218,8 +232,12 @@ int parse_entry(struct spec *spec, bool addpath, struct peer *peer, uint32_t mrt
 			char addr_str[INET_ADDRSTRLEN];
 			inet_ntop(AF_INET, input+index+4, addr_str, INET_ADDRSTRLEN);
 
-			agg_buffer = (char *)malloc(buf_len);
-			agg_buffer[0] = '\0';
+			// This should never be more than INET_ADDRSTRLEN
+			// (which includes null), plus length of a 32-bit
+			// decimal encoded int + a space + null
+			const int agg_buffer_len = INET_ADDRSTRLEN + 10 + 1 + 1;
+			agg_buffer = (char *)malloc(agg_buffer_len);
+			memset(agg_buffer, '\0', agg_buffer_len);
 			sprintf(agg_buffer, "%u %s", asn, addr_str);
 
 			break;
@@ -234,7 +252,7 @@ int parse_entry(struct spec *spec, bool addpath, struct peer *peer, uint32_t mrt
 			if (spec->communities) {
 				communities_buffer = (char *)malloc(buf_len);
 				communities_buffer[0] = '\0';
-				int rc = parse_bgp_path_attr_community(communities_buffer, buf_len, input+index, attr_header.len, spec->communities_hex);
+				int rc = parse_bgp_path_attr_community(&communities_buffer, buf_len, input+index, attr_header.len, spec->communities_hex);
 				if (rc != attr_header.len) {
 					printf("BGP_PATH_ATTR_COMMUNITY attribute incorrect length: parsed %u, expected %u\n",
 						rc, attr_header.len);
@@ -243,19 +261,33 @@ int parse_entry(struct spec *spec, bool addpath, struct peer *peer, uint32_t mrt
 			break;
 		}
 		case BGP_PATH_ATTR_MP_REACH_NLRI: {
-			printf("Unhandled MP_REACH_NLRI\n");
-//			int rc = parse_bgp_path_attr_mp_reach_nlr
-//			if (rc != attr_header.len) {
-//				printf("MP_REACH_NLRI attribute incorrect length: parsed %u, expected %u\n",
-//					rc, attr_header.len);
-//				fprintf(stderr, "MP_REACH_NLRI attribute incorrect length: parsed %u, expected %u\n",
-//					rc, attr_header.len);
+//			if (debug) {
+//				printf("Unhandled MP_REACH_NLRI\n");
 //			}
-//			//mask -= BGP_PATH_ATTR_MP_REACH_NLRI_MASK;
+			nlri_buffer = (char *)malloc(buf_len);
+			nlri_buffer[0] = '\0';
+			int rc = parse_bgp_path_attr_mp_reach_nlri(nlri_buffer, buf_len, input+index, attr_header.len);
+			if (rc != attr_header.len) {
+				printf("MP_REACH_NLRI attribute incorrect length: parsed %u, expected %u\n",
+					rc, attr_header.len);
+				fprintf(stderr, "MP_REACH_NLRI attribute incorrect length: parsed %u, expected %u\n",
+					rc, attr_header.len);
+			}
+			//mask -= BGP_PATH_ATTR_MP_REACH_NLRI_MASK;
+			//printf("mp_reach_nlri: %s\n", nlri_buffer);
 			break;
 		}
 		case BGP_PATH_ATTR_LARGE_COMMUNITY: {
-			printf("Not yet parsing large community\n");
+			uint32_t a;
+			uint32_t b;
+			uint32_t c;
+
+			memcpy(&a, input+index, 4);
+			memcpy(&b, input+index+4, 4);
+			memcpy(&c, input+index+8, 4);
+
+			fprintf(stderr, "Not yet parsing large community: %08x %08x %08x\n", a, b, c);
+
 			break;
 		}
 		default: {
@@ -268,6 +300,14 @@ int parse_entry(struct spec *spec, bool addpath, struct peer *peer, uint32_t mrt
 		index += attr_header.len;
 	}
 
+	char *nexthop = NULL;
+	if (nexthop_buffer != NULL) {
+		nexthop = nexthop_buffer;
+	}
+	else if (nlri_buffer != NULL) {
+		nexthop = nlri_buffer;
+	}
+
 	printf("TABLE_DUMP2|%u|B|%s|%u|%s/%u|%s|%s|%s|0|%u|%s|%s|%s|\n",
 		mrt_timestamp,
 		peer[header.peer_idx].ip_addr,
@@ -275,7 +315,7 @@ int parse_entry(struct spec *spec, bool addpath, struct peer *peer, uint32_t mrt
 		net, pfxlen,
 		aspath_buffer == NULL ? "" : aspath_buffer,
 		origin_str(origin),
-		nexthop_buffer == NULL ? "" : nexthop_buffer,
+		nexthop == NULL ? "" : nexthop,
 		exitdisc,
 		communities_buffer == NULL ? "" : communities_buffer,
 		strlen(agg_nag) ? agg_nag : "NAG",
@@ -285,6 +325,7 @@ int parse_entry(struct spec *spec, bool addpath, struct peer *peer, uint32_t mrt
 	if (nexthop_buffer     != NULL) { free(nexthop_buffer);     nexthop_buffer = NULL;    }
 	if (agg_buffer         != NULL) { free(agg_buffer);         agg_buffer = NULL;        }
 	if (communities_buffer != NULL) { free(communities_buffer); communities_buffer = NULL;}
+	if (nlri_buffer        != NULL) { free(nlri_buffer);        nlri_buffer = NULL;       }
 
 	if (index != sizeof_header + header.attr_len) {
 		printf("Error: Bad length detected in IPv6 unicast entry: %u != %u\n",
