@@ -11,93 +11,88 @@
 
 extern bool debug;
 
-int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *input, int len)
+int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *input, int family, int len)
 {
 	int index = 0;
-	struct attr_mp_reach_nlri header;
-	memcpy(&header, input+index, sizeof(header));
-	header.afi = htons(header.afi);
 
-	index += sizeof(header);
-
+	// Regarding NLRI encoding in MRT dumps:
+	//
+	// https://www.rfc-editor.org/errata/eid6640
+	//
+	// There is one exception to the encoding of BGP attributes for the BGP
+	// MP_REACH_NLRI attribute (BGP Type Code 14) [RFC4760]. Since the AFI,
+	// SAFI, and NLRI information is already encoded in the RIB Entry Header
+	// or RIB_GENERIC Entry Header, only the Next Hop Address Length and
+	// Next Hop Address fields are included. The Reserved field is omitted.
+	// The attribute length is also adjusted to reflect only the length of
+	// the Next Hop Address Length and Next Hop Address fields.
+	//
+	// One way of solving this is to compare the attribute length of
+	// MP_REACH_NLRI with the first byte of the attribute. If the value of
+	// the first byte is equal to the attribute lenght - 1 then it is the
+	// RFC encoding else assume that a full MP_REACH_NLRI attribute was
+	// dumped in which case the parser needs to skip the first 3 bytes to
+	// get to the nexthop.
 	if (debug) {
-		printf("\n--- BGP PATH ATTR MP REACH NLRI (len:%u/%u) ---\n", len, header.nh_len);
-		print_hex(&header, 0, sizeof(header));
-		printf(" afi :%u\n", header.afi);
-		printf(" safi:%u\n", header.safi);
-		printf(" len (next hop):%u\n", header.nh_len);
+		printf("\n--- BGP PATH ATTR MP REACH NLRI (len:%u) ---\n", len);
+		print_hex(input+index, 0, len);
 	}
 
-	switch (header.afi) {
-	case 1: {
-		index += header.nh_len;
-		break;
+	if (input[0] != len - 1) {
+		index += 3;
 	}
-	case 2: {
-		inet_ntop(AF_INET6, input+index, buffer, buffer_len);
-		index += header.nh_len;
-		break;
-	}
-	default: {
-		fprintf(stdout, "Unknown AF type in NLRI information: %u\n", header.afi);
-		return index;
-	}
-	}
-
-	// reserved octet
-	//printf("[%3u] DEBUG: Skipping reserved octect at pos %u\n", index, index);
-	index += 1;
 
 	int output_idx = strlen(buffer);
-	int remaining  = buffer_len - output_idx;
 
-	while (index < len) {
-		uint8_t nlri_len;
-		memcpy(&nlri_len, input+index, 1);
-		index += 1;
+	uint8_t nexthop_addr_len = *(input+index);
+	index += 1;
 
-		if (debug) {
-			printf("--- NLRI ---\n");
-			printf(" nlri_len:%u\n",      nlri_len);
-		}
+	if (debug) {
+		printf("--- NLRI ---\n");
+		printf(" nexthop_addr_len:%u bits\n", nexthop_addr_len);
+		printf(" index:%u\n", index);
+	}
 
-		if (nlri_len == 0) {
-			continue;
-		}
-
-		switch (header.afi) {
-		case 1: {
-			char addr_str[INET_ADDRSTRLEN];
-			inet_ntop(AF_INET, input+index, addr_str, INET_ADDRSTRLEN);
-
-			int16_t len = 0, i = nlri_len;
-			while (i > 0) {
-				len++; i-=8;
+	switch (family) {
+		case TABLE_DUMP_V2_RIB_IPV4_UNICAST:
+		case TABLE_DUMP_V2_RIB_IPV4_UNICAST_ADDPATH: {
+			if (nexthop_addr_len % 4 != 0) {
+				fprintf(stderr, "Bad next hop addr length: %u\n", nexthop_addr_len);
+				return index;
 			}
 
-			index += len;
+			char addr_str[INET_ADDRSTRLEN];
+			inet_ntop(AF_INET, input+index, buffer, INET_ADDRSTRLEN);
+
+			index += nexthop_addr_len;
+
 			break;
 		}
-		case 2: {
-			char addr_str[INET6_ADDRSTRLEN];
-			inet_ntop(AF_INET6, input+index, addr_str, INET6_ADDRSTRLEN);
-
-			int16_t len = 0, i = nlri_len;
-			while (i > 0) {
-				len++; i-=8;
+		case TABLE_DUMP_V2_RIB_IPV6_UNICAST:
+		case TABLE_DUMP_V2_RIB_IPV6_UNICAST_ADDPATH: {
+			if (nexthop_addr_len % 16 != 0) {
+				fprintf(stderr, "Bad next hop addr length: %u\n", nexthop_addr_len);
+				return index;
 			}
+			char addr_str[INET6_ADDRSTRLEN];
+			inet_ntop(AF_INET6, input+index, buffer, INET6_ADDRSTRLEN);
 
-			index += len;
+			index += nexthop_addr_len;
+
 			break;
 		}
 		default: {
-			fprintf(stdout, "[%3u] Unknown AF type in NLRI information: %u\n", index, header.afi);
+			fprintf(stderr, "[%3u] Unknown AF type in NLRI information: %u\n", index, family);
 			return index;
-		}
 		}
 	}
 
-	return index;
+//	if (index != len) {
+//		fprintf(stderr, "bad NLRI read?\n");
+//	}
+
+//	return index;
+	return len;
 }
 
 

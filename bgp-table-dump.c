@@ -36,7 +36,7 @@ extern bool debug;
            ... time                   | Attribute Length              |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_entry(struct spec *spec, bool addpath, struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, int input_len, char *net, uint16_t pfxlen)
+int parse_entry(struct spec *spec, bool addpath, int family, struct peer *peer, uint32_t mrt_timestamp, uint8_t *input, int input_len, char *net, uint16_t pfxlen)
 {
 	struct table_dump_v2_ipv6_unicast_header header;
 	uint16_t index = 0;
@@ -266,7 +266,7 @@ int parse_entry(struct spec *spec, bool addpath, struct peer *peer, uint32_t mrt
 //			}
 			nlri_buffer = (char *)malloc(buf_len);
 			nlri_buffer[0] = '\0';
-			int rc = parse_bgp_path_attr_mp_reach_nlri(nlri_buffer, buf_len, input+index, attr_header.len);
+			int rc = parse_bgp_path_attr_mp_reach_nlri(nlri_buffer, buf_len, input+index, family, attr_header.len);
 			if (rc != attr_header.len) {
 				printf("MP_REACH_NLRI attribute incorrect length: parsed %u, expected %u\n",
 					rc, attr_header.len);
@@ -391,7 +391,7 @@ int parse_ipvN_unicast(struct spec *spec, bool addpath, struct peer *peer_index,
 
 	uint16_t i;
 	for (i = 0; i < entries_count; i++) {
-		int rc = parse_entry(spec, addpath, peer_index, mrt_timestamp, input+index, input_len-index, out_str, pfx_len);
+		int rc = parse_entry(spec, addpath, family, peer_index, mrt_timestamp, input+index, input_len-index, out_str, pfx_len);
 		if (rc == -1) {
 			fprintf(stderr, "parse_entry() failed\n");
 			return -1;
