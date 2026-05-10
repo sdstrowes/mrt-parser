@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 int mrt_open(struct mrt_fd **fd_p, bool is_mmap, char *fn)
 {
@@ -46,7 +47,10 @@ int mrt_open(struct mrt_fd **fd_p, bool is_mmap, char *fn)
 			free(fd);
 			return -1;
 		}
+		madvise(fd->mmap, fd->length, MADV_SEQUENTIAL);
+		madvise(fd->mmap, fd->length, MADV_WILLNEED);
 		fd->i = 0;
+		fd->released = 0;
 	}
 	else {
 		fd->file = gzopen(fn, "r");
@@ -82,6 +86,15 @@ int mrt_read(struct mrt_fd *fd, void *buffer, unsigned int len)
 	return 0;
 }
 
+uint8_t *mrt_ptr(struct mrt_fd *fd, uint32_t len)
+{
+	if (!fd->is_mmap) return NULL;
+	if (fd->i + len > fd->length) return NULL;
+	uint8_t *ptr = (uint8_t *)(fd->mmap + fd->i);
+	fd->i += len;
+	return ptr;
+}
+
 void mrt_seek(struct mrt_fd *fd, uint32_t delta)
 {
 	if (fd->is_mmap) {
@@ -94,6 +107,20 @@ void mrt_seek(struct mrt_fd *fd, uint32_t delta)
 	}
 	else {
 		gzseek(fd->file, delta, SEEK_CUR);
+	}
+}
+
+void mrt_release(struct mrt_fd *fd)
+{
+	if (!fd->is_mmap) return;
+
+	static long page_size = 0;
+	if (!page_size) page_size = sysconf(_SC_PAGESIZE);
+
+	size_t releasable = (fd->i / (size_t)page_size) * (size_t)page_size;
+	if (releasable > fd->released) {
+		madvise(fd->mmap + fd->released, releasable - fd->released, MADV_DONTNEED);
+		fd->released = releasable;
 	}
 }
 

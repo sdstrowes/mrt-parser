@@ -13,11 +13,14 @@ struct mrt_fd {
 	char *mmap;
 	size_t length;
 	size_t i;
+	size_t released;
 };
 
 int mrt_open(struct mrt_fd **fd, bool is_mmap, char *fn);
 int mrt_read(struct mrt_fd *fd, void *buffer, unsigned int len);
+uint8_t *mrt_ptr(struct mrt_fd *fd, uint32_t len);
 void mrt_seek(struct mrt_fd *fd, uint32_t delta);
+void mrt_release(struct mrt_fd *fd);
 int mrt_close(struct mrt_fd **fd);
 
 

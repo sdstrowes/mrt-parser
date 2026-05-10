@@ -11,6 +11,33 @@
 
 extern bool debug;
 
+static int uint32_to_dec(char *buf, uint32_t val)
+{
+	if (val == 0) { buf[0] = '0'; return 1; }
+	char tmp[10];
+	int n = 0;
+	while (val) { tmp[n++] = '0' + (val % 10); val /= 10; }
+	for (int i = 0; i < n; i++) buf[i] = tmp[n-1-i];
+	return n;
+}
+
+static int uint32_to_hex8(char *buf, uint32_t val)
+{
+	static const char hex[] = "0123456789abcdef";
+	for (int i = 7; i >= 0; i--) { buf[i] = hex[val & 0xf]; val >>= 4; }
+	return 8;
+}
+
+static int uint16_to_hex4(char *buf, uint16_t val)
+{
+	static const char hex[] = "0123456789abcdef";
+	buf[0] = hex[(val >> 12) & 0xf];
+	buf[1] = hex[(val >>  8) & 0xf];
+	buf[2] = hex[(val >>  4) & 0xf];
+	buf[3] = hex[ val        & 0xf];
+	return 4;
+}
+
 int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *input, int family, int len)
 {
 	int index = 0;
@@ -41,8 +68,6 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 	if (input[0] != len - 1) {
 		index += 3;
 	}
-
-	int output_idx = strlen(buffer);
 
 	uint8_t nexthop_addr_len = *(input+index);
 	index += 1;
@@ -85,16 +110,11 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 		}
 	}
 
-//	if (index != len) {
-//		fprintf(stderr, "bad NLRI read?\n");
-//	}
-
-//	return index;
 	return len;
 }
 
 
-int parse_bgp_path_attr_community(char **buffer_ptr, int buffer_size, uint8_t *input, int input_size, bool as_hex)
+int parse_bgp_path_attr_community(char **buffer_ptr, int *buffer_size, uint8_t *input, int input_size, bool as_hex)
 {
 	if (input_size % 4 != 0) {
 		fprintf(stderr, "Malformed community of length %u\n", input_size);
@@ -103,24 +123,22 @@ int parse_bgp_path_attr_community(char **buffer_ptr, int buffer_size, uint8_t *i
 	char *buffer = *buffer_ptr;
 	int input_idx = 0;
 	int output_idx = 0;
-	int remaining = buffer_size;
-	int i = 0, rc;
+	int remaining = *buffer_size;
+	int i = 0, n;
 
 	while (input_idx < input_size) {
 
-		// add extra buffer space if low
-		if (remaining < 16) {  // arbitrary
-			char *tmp = (char *)realloc(buffer, buffer_size + 256);
+		if (remaining < 16) {
+			int new_size = *buffer_size * 2;
+			char *tmp = (char *)realloc(buffer, new_size);
 			if (tmp == NULL) {
 				fprintf(stderr, "ERROR: realloc() failed\n");
+				return input_idx;
 			}
-			else {
-				memset(tmp+buffer_size, '\0', 256);
-				remaining += 256;
-				buffer_size += 256;
-				buffer = tmp;
-				*buffer_ptr = tmp;
-			}
+			remaining += new_size - *buffer_size;
+			*buffer_size = new_size;
+			buffer = tmp;
+			*buffer_ptr = tmp;
 		}
 
 		uint16_t a, b;
@@ -132,30 +150,24 @@ int parse_bgp_path_attr_community(char **buffer_ptr, int buffer_size, uint8_t *i
 		input_idx += 2;
 
 		if (as_hex) {
-			rc = snprintf(buffer+output_idx, remaining, "%04x:%04x ", a, b);
+			n = uint16_to_hex4(buffer+output_idx, a);
+			output_idx += n; remaining -= n;
+			buffer[output_idx++] = ':'; remaining--;
+			n = uint16_to_hex4(buffer+output_idx, b);
+			output_idx += n; remaining -= n;
 		}
 		else {
-			rc = snprintf(buffer+output_idx, remaining, "%u:%u ", a, b);
+			n = uint32_to_dec(buffer+output_idx, a);
+			output_idx += n; remaining -= n;
+			buffer[output_idx++] = ':'; remaining--;
+			n = uint32_to_dec(buffer+output_idx, b);
+			output_idx += n; remaining -= n;
 		}
-		if (rc < 0) {
-			printf("ERROR: Cannot write community\n");
-		}
-		else if (rc >= remaining) {
-			printf("ERROR: Not enough space in buffer for community\n");
-		}
-
-		output_idx += rc;
-		remaining  -= rc;
-
-		if (remaining < 0) {
-			// This should never happen, but bail if somehow we get here
-			return input_idx;
-		}
+		buffer[output_idx++] = ' '; remaining--;
 
 		i++;
 	}
 
-	// remove the trailing space
 	if (i > 0) {
 		output_idx--;
 		buffer[output_idx] = '\0';
@@ -185,16 +197,16 @@ int parse_bgp_path_attr_nexthop(char *buffer, int remaining, uint8_t *input, int
    to 'len' bytes in the attribute
        0                   1                   2                   3
        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ 
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
       |    type == ASPATH_AS_SE[TQ]   |    Count = num ASNs           |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_bgp_path_attr_aspath(char **buffer_ptr, int buffer_size, uint8_t *input, int len, bool as_hex)
+int parse_bgp_path_attr_aspath(char **buffer_ptr, int *buffer_size, uint8_t *input, int len, bool as_hex)
 {
 	int idx = 0;
 	char *buffer = *buffer_ptr;
 	int buffer_idx = 0;
-	int remaining  = buffer_size;
+	int remaining  = *buffer_size;
 
 	while (idx < len) {
 		struct attr_as_path_header header;
@@ -208,121 +220,70 @@ int parse_bgp_path_attr_aspath(char **buffer_ptr, int buffer_size, uint8_t *inpu
 			printf(" count:%u\n", header.count);
 		}
 
-		uint32_t *asn;
 		int hop_count = 0;
 		int n;
-		if (header.type ==  ASPATH_AS_SET) {
+		if (header.type == ASPATH_AS_SET) {
 			while (hop_count < header.count) {
-				if (remaining < 16) {  // arbitrary
-					char *tmp;
-					tmp = (char *)realloc(buffer, buffer_size + 256);
+				if (remaining < 16) {
+					int new_size = *buffer_size * 2;
+					char *tmp = (char *)realloc(buffer, new_size);
 					if (tmp == NULL) {
 						fprintf(stderr, "ERROR: realloc() failed\n");
+						break;
 					}
-					else {
-						memset(tmp+buffer_size, '\0', 256);
-						remaining += 256;
-						buffer_size += 256;
-						buffer = tmp;
-						*buffer_ptr = tmp;
-					}
+					remaining += new_size - *buffer_size;
+					*buffer_size = new_size;
+					buffer = tmp;
+					*buffer_ptr = tmp;
 				}
 
-				asn = (uint32_t *)(input+idx);
+				uint32_t val = htonl(*(uint32_t *)(input+idx));
 				if (hop_count == 0) {
-					if (as_hex) {
-						n = snprintf(buffer + buffer_idx, remaining, " {%08x", htonl(*asn));
-					}
-					else {
-						n = snprintf(buffer + buffer_idx, remaining, " {%u", htonl(*asn));
-					}
-					if (n < 0) {
-						fprintf(stderr, "ERROR: snprintf() failed\n");
-					}
-					else if (n >= remaining) {
-						printf("WARNING: AS path truncated\n");
-					}
-					buffer_idx += n;
-					remaining  -= n;
-					if (remaining < 0) {remaining = 0;}
-					idx += sizeof(uint32_t);
-					hop_count++;
+					buffer[buffer_idx++] = ' ';
+					buffer[buffer_idx++] = '{';
+					remaining -= 2;
+				} else {
+					buffer[buffer_idx++] = ',';
+					remaining--;
 				}
-				else {
-					if (as_hex) {
-						n = snprintf(buffer + buffer_idx, remaining, ",%08x", htonl(*asn));
-					}
-					else {
-						n = snprintf(buffer + buffer_idx, remaining, ",%u", htonl(*asn));
-					}
-					if (n < 0) {
-						fprintf(stderr, "ERROR: snprintf() failed\n");
-					}
-					else if (n >= remaining) {
-						printf("WARNING: AS path truncated\n");
-					}
-					buffer_idx += n;
-					remaining  -= n;
-					if (remaining < 0) {remaining = 0;}
-					idx += sizeof(uint32_t);
-					hop_count++;
-				}
+				n = as_hex ? uint32_to_hex8(buffer + buffer_idx, val)
+				           : uint32_to_dec(buffer + buffer_idx, val);
+				buffer_idx += n; remaining -= n;
+				idx += sizeof(uint32_t);
+				hop_count++;
 			}
-			snprintf(buffer + buffer_idx, remaining, "}");
-			buffer_idx++;
+			buffer[buffer_idx++] = '}';
 			remaining--;
 		}
 		else if (header.type == ASPATH_AS_SEQ) {
 			while (hop_count < header.count) {
-
-				if (remaining < 16) {  // arbitrary
-					char *tmp;
-					tmp = (char *)realloc(buffer, buffer_size + 256);
+				if (remaining < 16) {
+					int new_size = *buffer_size * 2;
+					char *tmp = (char *)realloc(buffer, new_size);
 					if (tmp == NULL) {
 						fprintf(stderr, "ERROR: realloc() failed\n");
+						break;
 					}
-					else {
-						memset(tmp+buffer_size, '\0', 256);
-						remaining += 256;
-						buffer_size += 256;
-						buffer = tmp;
-						*buffer_ptr = tmp;
-					}
+					remaining += new_size - *buffer_size;
+					*buffer_size = new_size;
+					buffer = tmp;
+					*buffer_ptr = tmp;
 				}
 
-				asn = (uint32_t *)(input+idx);
+				uint32_t val = htonl(*(uint32_t *)(input+idx));
 				if (buffer_idx > 0) {
-					if (as_hex) {
-						n = snprintf(buffer + buffer_idx, remaining, " %08x", htonl(*asn));
-					}
-					else {
-						n = snprintf(buffer + buffer_idx, remaining, " %u", htonl(*asn));
-					}
+					buffer[buffer_idx++] = ' ';
+					remaining--;
 				}
-				else {
-					if (as_hex) {
-						n = snprintf(buffer + buffer_idx, remaining, "%08x", htonl(*asn));
-					}
-					else {
-						n = snprintf(buffer + buffer_idx, remaining, "%u", htonl(*asn));
-					}
-				}
-				if (n < 0) {
-					fprintf(stderr, "ERROR: snprintf() failed\n");
-				}
-				else if (n >= remaining) {
-					printf("WARNING: AS path truncated\n");
-				}
-				buffer_idx += n;
-				remaining  -= n;
-				if (remaining < 0) {remaining = 0;}
+				n = as_hex ? uint32_to_hex8(buffer + buffer_idx, val)
+				           : uint32_to_dec(buffer + buffer_idx, val);
+				buffer_idx += n; remaining -= n;
 				idx += sizeof(uint32_t);
 				hop_count++;
 			}
 		}
 	}
 
+	buffer[buffer_idx] = '\0';
 	return idx;
 }
-
-

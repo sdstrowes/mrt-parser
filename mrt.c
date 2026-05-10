@@ -162,13 +162,13 @@ int parse_bgp_message(uint8_t *input)
 	struct bgp_message_header *header = (struct bgp_message_header *)input;
 	index += sizeof(struct bgp_message_header);
 
-	int i;
-	for (i = 0; i < 16; i++) {
-		uint8_t cmp = 0xff;
-		if (memcmp(&header->marker[i], &cmp, sizeof(uint8_t))) {
-			fprintf(stderr, "ERROR: Marker on BGP header is not all-ones!\n");
-			return index;
-		}
+	static const uint8_t bgp_marker[16] = {
+		0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
+		0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff
+	};
+	if (memcmp(header->marker, bgp_marker, 16) != 0) {
+		fprintf(stderr, "ERROR: Marker on BGP header is not all-ones!\n");
+		return index;
 	}
 
 	printf("BGP Message length: %x\n", htons(header->length));
@@ -378,8 +378,6 @@ void parse_spec(char *arg, struct spec *spec)
 
 	while (tmp != NULL) {
 
-		printf("looping\n");
-
 		if (!strcmp(tmp, "aspath")) {
 			spec->aspath = true;
 			spec->aspath_hex = false;
@@ -400,12 +398,26 @@ void parse_spec(char *arg, struct spec *spec)
 		tmp = strtok(NULL, " ,");
 	}
 
-	printf("spec: %u %u %u %u\n", spec->aspath, spec->aspath_hex, spec->communities, spec->communities_hex);
+}
+
+static uint8_t *get_record(struct mrt_fd *fd, uint8_t **scratch, uint32_t *scratch_size, uint32_t len)
+{
+	uint8_t *ptr = mrt_ptr(fd, len);
+	if (ptr) return ptr;
+	if (len > *scratch_size) {
+		uint8_t *tmp = realloc(*scratch, len);
+		if (!tmp) { fprintf(stderr, "realloc failed\n"); exit(EXIT_FAILURE); }
+		*scratch = tmp;
+		*scratch_size = len;
+	}
+	if (mrt_read(fd, *scratch, len) == -1) return NULL;
+	return *scratch;
 }
 
 int main(int argc, char *argv[])
 {
 	signal(SIGINT, interrupt_handler);
+	setvbuf(stdout, NULL, _IOFBF, 1 << 20);
 
 	debug  = false;
 	bool parsev4 = false;
@@ -471,6 +483,9 @@ int main(int argc, char *argv[])
 		parsev6 = true;
 	}
 
+	uint8_t *scratch = NULL;
+	uint32_t scratch_size = 0;
+
 	struct mrt_header header;
 	while (running && !mrt_read(fd, &header, sizeof(struct mrt_header))) {
 		header.ts      = ntohl(header.ts);
@@ -493,26 +508,25 @@ int main(int argc, char *argv[])
 			switch (header.subtype) {
 			case TABLE_DUMP_V2_PEER_INDEX_TABLE: {
 				if (parse_peerindex) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					mrt_read(fd, input, header.length);
+					uint8_t *input = get_record(fd, &scratch, &scratch_size, header.length);
+					if (!input) break;
 					uint32_t bytes_parsed = parse_peer_index_table(input, &peer_index);
-					free(input);
-
 					if (bytes_parsed != header.length) {
 						printf("Error: parsed %u bytes from a header length %u\n",
 							bytes_parsed, header.length);
 						exit(EXIT_FAILURE);
 					}
 				}
+				else {
+					mrt_seek(fd, header.length);
+				}
 				break;
 			}
 			case TABLE_DUMP_V2_RIB_IPV4_UNICAST: {
 				if (parsev4) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					mrt_read(fd, input, header.length);
+					uint8_t *input = get_record(fd, &scratch, &scratch_size, header.length);
+					if (!input) break;
 					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, false, peer_index, input, header.length, header.ts, header.subtype);
-					free(input);
-
 					if (bytes_parsed != header.length) {
 						printf("Error: parsed %u bytes from a header length %u\n",
 							bytes_parsed, header.length);
@@ -526,11 +540,9 @@ int main(int argc, char *argv[])
 			}
 			case TABLE_DUMP_V2_RIB_IPV6_UNICAST: {
 				if (parsev6) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					mrt_read(fd, input, header.length);
+					uint8_t *input = get_record(fd, &scratch, &scratch_size, header.length);
+					if (!input) break;
 					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, false, peer_index, input, header.length, header.ts, header.subtype);
-					free(input);
-
 					if (bytes_parsed != header.length) {
 						printf("Error: parsed %u bytes from a header length %u\n",
 							bytes_parsed, header.length);
@@ -544,11 +556,9 @@ int main(int argc, char *argv[])
 			}
 			case TABLE_DUMP_V2_RIB_IPV4_UNICAST_ADDPATH: {
 				if (parsev4) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					mrt_read(fd, input, header.length);
+					uint8_t *input = get_record(fd, &scratch, &scratch_size, header.length);
+					if (!input) break;
 					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, true, peer_index, input, header.length, header.ts, header.subtype);
-					free(input);
-
 					if (bytes_parsed != header.length) {
 						printf("Error: parsed %u bytes from a header length %u\n",
 							bytes_parsed, header.length);
@@ -562,11 +572,9 @@ int main(int argc, char *argv[])
 			}
 			case TABLE_DUMP_V2_RIB_IPV6_UNICAST_ADDPATH: {
 				if (parsev6) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					mrt_read(fd, input, header.length);
+					uint8_t *input = get_record(fd, &scratch, &scratch_size, header.length);
+					if (!input) break;
 					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, true, peer_index, input, header.length, header.ts, header.subtype);
-					free(input);
-
 					if (bytes_parsed != header.length) {
 						printf("Error: parsed %u bytes from a header length %u\n",
 							bytes_parsed, header.length);
@@ -590,10 +598,8 @@ int main(int argc, char *argv[])
 		case MRT_BGP4MP: {
 			switch (header.subtype) {
 			case BGP4MP_STATE_CHANGE: {
-				uint8_t *input = (uint8_t *)malloc(header.length);
-				mrt_read(fd, input, header.length);
-				uint32_t bytes_parsed = parse_bgp4mp_state_change(input, header.subtype);
-				free(input);
+				uint8_t *input = get_record(fd, &scratch, &scratch_size, header.length);
+				if (input) parse_bgp4mp_state_change(input, header.subtype);
 				break;
 			}
 			case BGP4MP_MESSAGE: {
@@ -602,10 +608,8 @@ int main(int argc, char *argv[])
 				break;
 			}
 			case BGP4MP_MESSAGE_AS4: {
-				uint8_t *input = (uint8_t *)malloc(header.length);
-				mrt_read(fd, input, header.length);
-				uint32_t bytes_parsed = parse_bgp4mp_message_as4(input, header.subtype);
-				free(input);
+				uint8_t *input = get_record(fd, &scratch, &scratch_size, header.length);
+				if (input) parse_bgp4mp_message_as4(input, header.subtype);
 				break;
 			}
 			case BGP4MP_STATE_CHANGE_AS4: {
@@ -638,7 +642,9 @@ int main(int argc, char *argv[])
 			}
 		}
 		}
+		mrt_release(fd);
 	}
+	if (scratch != NULL) free(scratch);
 	if (peer_index != NULL) {
 		free(peer_index);
 		peer_index = NULL;
