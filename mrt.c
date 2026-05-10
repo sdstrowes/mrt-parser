@@ -357,7 +357,8 @@ void print_help(char *name)
 	printf("Options:\n");
 	printf("	-f <file>	: Input file (required)\n");
 	printf("	-d		: Turns on debugging.\n");
-	printf("	-s		: Output spec: [0x]aspath, [0x]communities\n");
+	printf("	-m		: Use mmap to read input file.\n");
+	printf("	-s <spec>	: Output spec: [0x]aspath, [0x]communities\n");
 	printf("	-h		: Print this help then exit.\n");
 	printf("	-4		: Print only lines with IPv4 announcements.\n");
 	printf("	-6		: Print only lines with IPv6 announcements.\n");
