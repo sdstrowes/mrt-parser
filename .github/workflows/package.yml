@@ -1,0 +1,39 @@
+name: Build Debian Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get install -y zlib1g-dev
+
+      - name: Build
+        run: make
+
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          mkdir -p pkg/DEBIAN pkg/usr/bin
+          make install DESTDIR=pkg PREFIX=/usr
+          cat > pkg/DEBIAN/control <<EOF
+          Package: mrt-parser
+          Version: ${VERSION}
+          Architecture: amd64
+          Maintainer: Stephen D. Strowes <sdstrowes@gmail.com>
+          Depends: zlib1g
+          Description: MRT format BGP dump parser
+          EOF
+          dpkg-deb --build pkg mrt-parser_${VERSION}_amd64.deb
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mrt-parser_*_amd64.deb
