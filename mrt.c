@@ -8,9 +8,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <zlib.h>
-
 #include "mrt.h"
+#include "input.h"
 #include "mrt-parser-types.h"
 #include "bgp-path-attr.h"
 #include "bgp-table-dump.h"
@@ -407,7 +406,6 @@ int main(int argc, char *argv[])
 {
 	signal(SIGINT, interrupt_handler);
 
-	gzFile file;
 	debug  = false;
 	bool parsev4 = false;
 	bool parsev6 = false;
@@ -418,8 +416,12 @@ int main(int argc, char *argv[])
 
 	struct peer *peer_index = NULL;
 
+	char fn[1024] = {0};
+	bool is_mmap = false;
+	struct mrt_fd *fd;
+
 	int opt;
-	while ((opt = getopt(argc, argv, "46df:s:h")) != -1) {
+	while ((opt = getopt(argc, argv, "46dmf:s:h")) != -1) {
 		switch (opt) {
 		case '4': {
 			parsev4 = true;
@@ -435,11 +437,11 @@ int main(int argc, char *argv[])
 			break;
 		}
 		case 'f': {
-			file = gzopen(optarg, "r");
-			if (file == NULL) {
-				fprintf(stderr, "Could not open file; error: %s\n", strerror(errno));
-				exit(EXIT_FAILURE);
-			}
+			strncpy(fn, optarg, sizeof(fn) - 1);
+			break;
+		}
+		case 'm': {
+			is_mmap = true;
 			break;
 		}
 		case 's': {
@@ -454,13 +456,22 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	if (fn[0] == '\0') {
+		fprintf(stderr, "No input file specified\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (mrt_open(&fd, is_mmap, fn) == -1) {
+		exit(EXIT_FAILURE);
+	}
+
 	if (!parsev4 && !parsev6) {
 		parsev4 = true;
 		parsev6 = true;
 	}
 
 	struct mrt_header header;
-	while (running && gzread(file, &header, sizeof(struct mrt_header)) == sizeof(struct mrt_header)) {
+	while (running && !mrt_read(fd, &header, sizeof(struct mrt_header))) {
 		header.ts      = ntohl(header.ts);
 		header.type    = ntohs(header.type);
 		header.subtype = ntohs(header.subtype);
@@ -482,7 +493,7 @@ int main(int argc, char *argv[])
 			case TABLE_DUMP_V2_PEER_INDEX_TABLE: {
 				if (parse_peerindex) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
+					mrt_read(fd, input, header.length);
 					uint32_t bytes_parsed = parse_peer_index_table(input, &peer_index);
 					free(input);
 
@@ -497,7 +508,7 @@ int main(int argc, char *argv[])
 			case TABLE_DUMP_V2_RIB_IPV4_UNICAST: {
 				if (parsev4) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
+					mrt_read(fd, input, header.length);
 					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, false, peer_index, input, header.length, header.ts, header.subtype);
 					free(input);
 
@@ -508,14 +519,14 @@ int main(int argc, char *argv[])
 					}
 				}
 				else {
-					gzseek(file, header.length, SEEK_CUR);
+					mrt_seek(fd, header.length);
 				}
 				break;
 			}
 			case TABLE_DUMP_V2_RIB_IPV6_UNICAST: {
 				if (parsev6) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
+					mrt_read(fd, input, header.length);
 					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, false, peer_index, input, header.length, header.ts, header.subtype);
 					free(input);
 
@@ -526,14 +537,14 @@ int main(int argc, char *argv[])
 					}
 				}
 				else {
-					gzseek(file, header.length, SEEK_CUR);
+					mrt_seek(fd, header.length);
 				}
 				break;
 			}
 			case TABLE_DUMP_V2_RIB_IPV4_UNICAST_ADDPATH: {
 				if (parsev4) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
+					mrt_read(fd, input, header.length);
 					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, true, peer_index, input, header.length, header.ts, header.subtype);
 					free(input);
 
@@ -544,14 +555,14 @@ int main(int argc, char *argv[])
 					}
 				}
 				else {
-					gzseek(file, header.length, SEEK_CUR);
+					mrt_seek(fd, header.length);
 				}
 				break;
 			}
 			case TABLE_DUMP_V2_RIB_IPV6_UNICAST_ADDPATH: {
 				if (parsev6) {
 					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
+					mrt_read(fd, input, header.length);
 					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, true, peer_index, input, header.length, header.ts, header.subtype);
 					free(input);
 
@@ -562,7 +573,7 @@ int main(int argc, char *argv[])
 					}
 				}
 				else {
-					gzseek(file, header.length, SEEK_CUR);
+					mrt_seek(fd, header.length);
 				}
 				break;
 			}
@@ -570,7 +581,7 @@ int main(int argc, char *argv[])
 				if (debug) {
 					printf("Unhandled MRT_TABLE_DUMP_V2 subtype %u\n", header.subtype);
 				}
-				gzseek(file, header.length, SEEK_CUR);
+				mrt_seek(fd, header.length);
 			}
 			}
 			break;
@@ -579,43 +590,43 @@ int main(int argc, char *argv[])
 			switch (header.subtype) {
 			case BGP4MP_STATE_CHANGE: {
 				uint8_t *input = (uint8_t *)malloc(header.length);
-				gzread(file, input, header.length);
+				mrt_read(fd, input, header.length);
 				uint32_t bytes_parsed = parse_bgp4mp_state_change(input, header.subtype);
 				free(input);
 				break;
 			}
 			case BGP4MP_MESSAGE: {
 				printf("Unhandled BGP4MP_MESSAGE\n");
-				gzseek(file, header.length, SEEK_CUR);
+				mrt_seek(fd, header.length);
 				break;
 			}
 			case BGP4MP_MESSAGE_AS4: {
 				uint8_t *input = (uint8_t *)malloc(header.length);
-				gzread(file, input, header.length);
+				mrt_read(fd, input, header.length);
 				uint32_t bytes_parsed = parse_bgp4mp_message_as4(input, header.subtype);
 				free(input);
 				break;
 			}
 			case BGP4MP_STATE_CHANGE_AS4: {
 				printf("Unhandled BGP4MP_STATE_CHANGE_AS4\n");
-				gzseek(file, header.length, SEEK_CUR);
+				mrt_seek(fd, header.length);
 				break;
 			}
 			case BGP4MP_MESSAGE_LOCAL: {
 				printf("Unhandled BGP4MP_MESSAGE_LOCAL\n");
-				gzseek(file, header.length, SEEK_CUR);
+				mrt_seek(fd, header.length);
 				break;
 			}
 			case BGP4MP_MESSAGE_AS4_LOCAL: {
 				printf("Unhandled BGP4MP_MESSAGE_AS4_LOCAL\n");
-				gzseek(file, header.length, SEEK_CUR);
+				mrt_seek(fd, header.length);
 				break;
 			}
 			default: {
 				if (debug) {
 					printf("Unhandled BGP4MP subtype %u\n", header.subtype);
 				}
-				gzseek(file, header.length, SEEK_CUR);
+				mrt_seek(fd, header.length);
 			}
 			}
 			break;
@@ -631,7 +642,7 @@ int main(int argc, char *argv[])
 		free(peer_index);
 		peer_index = NULL;
 	}
-	gzclose(file);
+	mrt_close(&fd);
 
 	return EXIT_SUCCESS;
 }

@@ -61,7 +61,6 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 				return index;
 			}
 
-			char addr_str[INET_ADDRSTRLEN];
 			inet_ntop(AF_INET, input+index, buffer, INET_ADDRSTRLEN);
 
 			index += nexthop_addr_len;
@@ -74,7 +73,6 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 				fprintf(stderr, "Bad next hop addr length: %u\n", nexthop_addr_len);
 				return index;
 			}
-			char addr_str[INET6_ADDRSTRLEN];
 			inet_ntop(AF_INET6, input+index, buffer, INET6_ADDRSTRLEN);
 
 			index += nexthop_addr_len;
@@ -125,19 +123,19 @@ int parse_bgp_path_attr_community(char **buffer_ptr, int buffer_size, uint8_t *i
 			}
 		}
 
-		uint16_t *a, *b;
-		a = (uint16_t *)(input+input_idx);
-		*a = htons(*a);
+		uint16_t a, b;
+		memcpy(&a, input+input_idx, sizeof(a));
+		a = ntohs(a);
 		input_idx += 2;
-		b = (uint16_t *)(input+input_idx);
-		*b = htons(*b);
+		memcpy(&b, input+input_idx, sizeof(b));
+		b = ntohs(b);
 		input_idx += 2;
 
 		if (as_hex) {
-			rc = snprintf(buffer+output_idx, remaining, "%04x:%04x ", *a, *b);
+			rc = snprintf(buffer+output_idx, remaining, "%04x:%04x ", a, b);
 		}
 		else {
-			rc = snprintf(buffer+output_idx, remaining, "%u:%u ", *a, *b);
+			rc = snprintf(buffer+output_idx, remaining, "%u:%u ", a, b);
 		}
 		if (rc < 0) {
 			printf("ERROR: Cannot write community\n");

@@ -188,10 +188,12 @@ int parse_entry(struct spec *spec, bool addpath, int family, struct peer *peer, 
 				exit(1);
 			}
 			nexthop_buffer[0] = '\0';
-			int rc = parse_bgp_path_attr_nexthop(nexthop_buffer, buf_len, input+index, attr_header.len);
+			int rc = parse_bgp_path_attr_nexthop(nexthop_buffer, INET6_ADDRSTRLEN, input+index, attr_header.len);
 			if (rc != attr_header.len) {
 				fprintf(stderr, "NEXTHOP attribute incorrect length: parsed %u, expected %u\n",
 					rc, attr_header.len);
+				if (aspath_buffer != NULL) { free(aspath_buffer); aspath_buffer = NULL; }
+				free(nexthop_buffer);
 				return -1;
 			}
 			break;
@@ -286,7 +288,7 @@ int parse_entry(struct spec *spec, bool addpath, int family, struct peer *peer, 
 			memcpy(&b, input+index+4, 4);
 			memcpy(&c, input+index+8, 4);
 
-			fprintf(stderr, "Not yet parsing large community: %08x %08x %08x\n", a, b, c);
+			//fprintf(stderr, "Not yet parsing large community: %08x %08x %08x\n", a, b, c);
 
 			break;
 		}
