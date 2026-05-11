@@ -355,7 +355,7 @@ void print_help(char *name)
 	printf("Options:\n");
 	printf("	-f <file>	: Input file (required)\n");
 	printf("	-d		: Turns on debugging.\n");
-	printf("	-s		: Output spec: [0x]aspath, [0x]communities\n");
+	printf("	-s		: Output spec: [0x]aspath, [0x]communities, [0x]large_communities\n");
 	printf("	-h		: Print this help then exit.\n");
 	printf("	-4		: Print only lines with IPv4 announcements.\n");
 	printf("	-6		: Print only lines with IPv6 announcements.\n");
@@ -367,6 +367,8 @@ void set_spec_default(struct spec *spec)
 	spec->aspath_hex = false;
 	spec->communities = true;
 	spec->communities_hex = false;
+	spec->large_communities = true;
+	spec->large_communities_hex = false;
 }
 void parse_spec(char *arg, struct spec *spec)
 {
@@ -390,6 +392,14 @@ void parse_spec(char *arg, struct spec *spec)
 		if (!strcmp(tmp, "0xcommunities")) {
 			spec->communities = true;
 			spec->communities_hex = true;
+		}
+		if (!strcmp(tmp, "large_communities")) {
+			spec->large_communities = true;
+			spec->large_communities_hex = false;
+		}
+		if (!strcmp(tmp, "0xlarge_communities")) {
+			spec->large_communities = true;
+			spec->large_communities_hex = true;
 		}
 
 		tmp = strtok(NULL, " ,");

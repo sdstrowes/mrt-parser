@@ -173,6 +173,69 @@ int parse_bgp_path_attr_community(char **buffer_ptr, int buffer_size, uint8_t *i
 	return input_size;
 }
 
+int parse_bgp_path_attr_large_community(char **buffer_ptr, int buffer_size, uint8_t *input, int input_size, bool as_hex)
+{
+	if (input_size % 12 != 0) {
+		fprintf(stderr, "Malformed large community of length %u\n", input_size);
+	}
+
+	char *buffer = *buffer_ptr;
+	int input_idx = 0;
+	int output_idx = 0;
+	int remaining = buffer_size;
+	int i = 0;
+
+	while (input_idx < input_size) {
+		if (remaining < 36) {
+			char *tmp = (char *)realloc(buffer, buffer_size + 256);
+			if (tmp == NULL) {
+				fprintf(stderr, "ERROR: realloc() failed\n");
+			}
+			else {
+				memset(tmp+buffer_size, '\0', 256);
+				remaining += 256;
+				buffer_size += 256;
+				buffer = tmp;
+				*buffer_ptr = tmp;
+			}
+		}
+
+		uint32_t a, b, c;
+		memcpy(&a, input+input_idx,    sizeof(a)); a = ntohl(a); input_idx += 4;
+		memcpy(&b, input+input_idx,    sizeof(b)); b = ntohl(b); input_idx += 4;
+		memcpy(&c, input+input_idx,    sizeof(c)); c = ntohl(c); input_idx += 4;
+
+		int rc;
+		if (as_hex) {
+			write_hex8(buffer+output_idx, a);
+			buffer[output_idx+8] = ':';
+			write_hex8(buffer+output_idx+9, b);
+			buffer[output_idx+17] = ':';
+			write_hex8(buffer+output_idx+18, c);
+			buffer[output_idx+26] = ' ';
+			rc = 27;
+		} else {
+			int na = write_dec32(buffer+output_idx, a);
+			buffer[output_idx+na] = ':';
+			int nb = write_dec32(buffer+output_idx+na+1, b);
+			buffer[output_idx+na+1+nb] = ':';
+			int nc = write_dec32(buffer+output_idx+na+1+nb+1, c);
+			buffer[output_idx+na+1+nb+1+nc] = ' ';
+			rc = na + 1 + nb + 1 + nc + 1;
+		}
+		output_idx += rc;
+		remaining  -= rc;
+		i++;
+	}
+
+	if (i > 0) {
+		output_idx--;
+		buffer[output_idx] = '\0';
+	}
+
+	return input_size;
+}
+
 int parse_bgp_path_attr_nexthop(char *buffer, int remaining, uint8_t *input, int len)
 {
 	if (remaining < len) {

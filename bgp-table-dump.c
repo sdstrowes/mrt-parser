@@ -94,6 +94,7 @@ int parse_entry(struct spec *spec, bool addpath, int family, struct peer *peer, 
 	char *aspath_buffer = NULL;
 	char  nexthop_buffer[INET6_ADDRSTRLEN] = {0};
 	char *communities_buffer = NULL;
+	char *large_communities_buffer = NULL;
 	char  agg_nag[4];
 	char  agg_buffer[INET_ADDRSTRLEN + 12] = {0};
 	char  nlri_buffer[INET6_ADDRSTRLEN] = {0};
@@ -259,16 +260,15 @@ int parse_entry(struct spec *spec, bool addpath, int family, struct peer *peer, 
 			break;
 		}
 		case BGP_PATH_ATTR_LARGE_COMMUNITY: {
-			uint32_t a;
-			uint32_t b;
-			uint32_t c;
-
-			memcpy(&a, input+index, 4);
-			memcpy(&b, input+index+4, 4);
-			memcpy(&c, input+index+8, 4);
-
-			fprintf(stderr, "Not yet parsing large community: %08x %08x %08x\n", a, b, c);
-
+			if (spec->large_communities) {
+				large_communities_buffer = (char *)malloc(buf_len);
+				large_communities_buffer[0] = '\0';
+				int rc = parse_bgp_path_attr_large_community(&large_communities_buffer, buf_len, input+index, attr_header.len, spec->large_communities_hex);
+				if (rc != attr_header.len) {
+					fprintf(stderr, "BGP_PATH_ATTR_LARGE_COMMUNITY attribute incorrect length: parsed %u, expected %u\n",
+						rc, attr_header.len);
+				}
+			}
 			break;
 		}
 		default: {
@@ -283,7 +283,7 @@ int parse_entry(struct spec *spec, bool addpath, int family, struct peer *peer, 
 
 	char *nexthop = nexthop_buffer[0] != '\0' ? nexthop_buffer : nlri_buffer;
 
-	printf("TABLE_DUMP2|%u|B|%s|%u|%s/%u|%s|%s|%s|0|%u|%s|%s|%s|\n",
+	printf("TABLE_DUMP2|%u|B|%s|%u|%s/%u|%s|%s|%s|0|%u|%s|%s|%s|%s|\n",
 		mrt_timestamp,
 		peer[header.peer_idx].ip_addr,
 		peer[header.peer_idx].asn,
@@ -293,11 +293,13 @@ int parse_entry(struct spec *spec, bool addpath, int family, struct peer *peer, 
 		nexthop,
 		exitdisc,
 		communities_buffer == NULL ? "" : communities_buffer,
+		large_communities_buffer == NULL ? "" : large_communities_buffer,
 		strlen(agg_nag) ? agg_nag : "NAG",
 		agg_buffer);
 
-	if (aspath_buffer      != NULL) { free(aspath_buffer);      aspath_buffer = NULL;     }
-	if (communities_buffer != NULL) { free(communities_buffer); communities_buffer = NULL;}
+	if (aspath_buffer             != NULL) { free(aspath_buffer);             aspath_buffer = NULL;            }
+	if (communities_buffer        != NULL) { free(communities_buffer);        communities_buffer = NULL;       }
+	if (large_communities_buffer  != NULL) { free(large_communities_buffer);  large_communities_buffer = NULL; }
 
 	if (index != sizeof_header + header.attr_len) {
 		printf("Error: Bad length detected in IPv6 unicast entry: %u != %u\n",

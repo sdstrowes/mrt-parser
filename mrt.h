@@ -10,6 +10,8 @@ struct spec {
 	bool aspath_hex;
 	bool communities;
 	bool communities_hex;
+	bool large_communities;
+	bool large_communities_hex;
 };
 
 
