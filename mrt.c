@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <zlib.h>
+#include <libdeflate.h>
 
 #include "mrt.h"
 #include "bgp-table-dump.h"
@@ -409,16 +409,18 @@ int main(int argc, char *argv[])
 	signal(SIGINT, interrupt_handler);
 	setvbuf(stdout, NULL, _IOFBF, 1 << 20);
 
-	gzFile file;
 	debug  = false;
 	bool parsev4 = false;
 	bool parsev6 = false;
 	bool parse_peerindex = true;
+	char *filename = NULL;
 
 	struct spec spec;
 	set_spec_default(&spec);
 
 	struct peer *peer_index = NULL;
+
+	struct output_buffers bufs = {NULL, 0, NULL, 0, NULL, 0};
 
 	int opt;
 	while ((opt = getopt(argc, argv, "46df:s:h")) != -1) {
@@ -437,11 +439,7 @@ int main(int argc, char *argv[])
 			break;
 		}
 		case 'f': {
-			file = gzopen(optarg, "r");
-			if (file == NULL) {
-				fprintf(stderr, "Could not open file; error: %s\n", strerror(errno));
-				exit(EXIT_FAILURE);
-			}
+			filename = optarg;
 			break;
 		}
 		case 's': {
@@ -456,13 +454,85 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	if (filename == NULL) {
+		fprintf(stderr, "Error: no input file specified (-f)\n");
+		print_help(argv[0]);
+		exit(EXIT_FAILURE);
+	}
+
 	if (!parsev4 && !parsev6) {
 		parsev4 = true;
 		parsev6 = true;
 	}
 
-	struct mrt_header header;
-	while (running && gzread(file, &header, sizeof(struct mrt_header)) == sizeof(struct mrt_header)) {
+	/* Read entire file, decompress if gzip */
+	FILE *f = fopen(filename, "rb");
+	if (f == NULL) {
+		fprintf(stderr, "Could not open file: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+	if (fseek(f, 0, SEEK_END) != 0) {
+		fprintf(stderr, "fseek failed: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+	long compressed_size = ftell(f);
+	if (compressed_size < 0) {
+		fprintf(stderr, "ftell failed: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+	rewind(f);
+
+	uint8_t *compressed = malloc(compressed_size);
+	if (compressed == NULL) {
+		fprintf(stderr, "malloc failed for %ld bytes\n", compressed_size);
+		exit(EXIT_FAILURE);
+	}
+	if ((long)fread(compressed, 1, compressed_size, f) != compressed_size) {
+		fprintf(stderr, "Read error: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+	fclose(f);
+
+	uint8_t *data;
+	size_t   data_len;
+
+	if (compressed_size >= 2 && compressed[0] == 0x1f && compressed[1] == 0x8b) {
+		/* gzip: read ISIZE from the last 4 bytes (little-endian) */
+		uint32_t isize;
+		memcpy(&isize, compressed + compressed_size - 4, sizeof(isize));
+		size_t out_cap = isize ? (size_t)isize : (size_t)compressed_size * 10;
+
+		data = malloc(out_cap);
+		if (data == NULL) {
+			fprintf(stderr, "malloc failed for decompression buffer (%zu bytes)\n", out_cap);
+			exit(EXIT_FAILURE);
+		}
+
+		struct libdeflate_decompressor *dc = libdeflate_alloc_decompressor();
+		enum libdeflate_result res = libdeflate_gzip_decompress(
+			dc, compressed, compressed_size, data, out_cap, &data_len);
+		libdeflate_free_decompressor(dc);
+		free(compressed);
+
+		if (res != LIBDEFLATE_SUCCESS) {
+			fprintf(stderr, "Decompression failed (error %d)\n", res);
+			exit(EXIT_FAILURE);
+		}
+	} else {
+		/* Plain (uncompressed) MRT file */
+		data     = compressed;
+		data_len = compressed_size;
+	}
+
+	uint8_t *cur       = data;
+	size_t   remaining = data_len;
+
+	while (running && remaining >= sizeof(struct mrt_header)) {
+		struct mrt_header header;
+		memcpy(&header, cur, sizeof(header));
+		cur       += sizeof(header);
+		remaining -= sizeof(header);
+
 		header.ts      = ntohl(header.ts);
 		header.type    = ntohs(header.type);
 		header.subtype = ntohs(header.subtype);
@@ -478,16 +548,17 @@ int main(int argc, char *argv[])
 			printf("\n");
 		}
 
+		if (remaining < header.length) {
+			fprintf(stderr, "Truncated record (need %u, have %zu)\n", header.length, remaining);
+			break;
+		}
+
 		switch (header.type) {
 		case MRT_TABLE_DUMP_V2: {
 			switch (header.subtype) {
 			case TABLE_DUMP_V2_PEER_INDEX_TABLE: {
 				if (parse_peerindex) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_peer_index_table(input, &peer_index);
-					free(input);
-
+					uint32_t bytes_parsed = parse_peer_index_table(cur, &peer_index);
 					if (bytes_parsed != header.length) {
 						printf("Error: parsed %u bytes from a header length %u\n",
 							bytes_parsed, header.length);
@@ -498,73 +569,45 @@ int main(int argc, char *argv[])
 			}
 			case TABLE_DUMP_V2_RIB_IPV4_UNICAST: {
 				if (parsev4) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, false, peer_index, input, header.length, header.ts, header.subtype);
-					free(input);
-
+					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, &bufs, false, peer_index, cur, header.length, header.ts, header.subtype);
 					if (bytes_parsed != header.length) {
 						printf("Error: parsed %u bytes from a header length %u\n",
 							bytes_parsed, header.length);
 						exit(EXIT_FAILURE);
 					}
-				}
-				else {
-					gzseek(file, header.length, SEEK_CUR);
 				}
 				break;
 			}
 			case TABLE_DUMP_V2_RIB_IPV6_UNICAST: {
 				if (parsev6) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, false, peer_index, input, header.length, header.ts, header.subtype);
-					free(input);
-
+					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, &bufs, false, peer_index, cur, header.length, header.ts, header.subtype);
 					if (bytes_parsed != header.length) {
 						printf("Error: parsed %u bytes from a header length %u\n",
 							bytes_parsed, header.length);
 						exit(EXIT_FAILURE);
 					}
-				}
-				else {
-					gzseek(file, header.length, SEEK_CUR);
 				}
 				break;
 			}
 			case TABLE_DUMP_V2_RIB_IPV4_UNICAST_ADDPATH: {
 				if (parsev4) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, true, peer_index, input, header.length, header.ts, header.subtype);
-					free(input);
-
+					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, &bufs, true, peer_index, cur, header.length, header.ts, header.subtype);
 					if (bytes_parsed != header.length) {
 						printf("Error: parsed %u bytes from a header length %u\n",
 							bytes_parsed, header.length);
 						exit(EXIT_FAILURE);
 					}
-				}
-				else {
-					gzseek(file, header.length, SEEK_CUR);
 				}
 				break;
 			}
 			case TABLE_DUMP_V2_RIB_IPV6_UNICAST_ADDPATH: {
 				if (parsev6) {
-					uint8_t *input = (uint8_t *)malloc(header.length);
-					gzread(file, input, header.length);
-					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, true, peer_index, input, header.length, header.ts, header.subtype);
-					free(input);
-
+					uint32_t bytes_parsed = parse_ipvN_unicast(&spec, &bufs, true, peer_index, cur, header.length, header.ts, header.subtype);
 					if (bytes_parsed != header.length) {
 						printf("Error: parsed %u bytes from a header length %u\n",
 							bytes_parsed, header.length);
 						exit(EXIT_FAILURE);
 					}
-				}
-				else {
-					gzseek(file, header.length, SEEK_CUR);
 				}
 				break;
 			}
@@ -572,7 +615,6 @@ int main(int argc, char *argv[])
 				if (debug) {
 					printf("Unhandled MRT_TABLE_DUMP_V2 subtype %u\n", header.subtype);
 				}
-				gzseek(file, header.length, SEEK_CUR);
 			}
 			}
 			break;
@@ -580,44 +622,33 @@ int main(int argc, char *argv[])
 		case MRT_BGP4MP: {
 			switch (header.subtype) {
 			case BGP4MP_STATE_CHANGE: {
-				uint8_t *input = (uint8_t *)malloc(header.length);
-				gzread(file, input, header.length);
-				parse_bgp4mp_state_change(input, header.subtype);
-				free(input);
+				parse_bgp4mp_state_change(cur, header.subtype);
 				break;
 			}
 			case BGP4MP_MESSAGE: {
 				printf("Unhandled BGP4MP_MESSAGE\n");
-				gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_MESSAGE_AS4: {
-				uint8_t *input = (uint8_t *)malloc(header.length);
-				gzread(file, input, header.length);
-				parse_bgp4mp_message_as4(input, header.subtype);
-				free(input);
+				parse_bgp4mp_message_as4(cur, header.subtype);
 				break;
 			}
 			case BGP4MP_STATE_CHANGE_AS4: {
 				printf("Unhandled BGP4MP_STATE_CHANGE_AS4\n");
-				gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_MESSAGE_LOCAL: {
 				printf("Unhandled BGP4MP_MESSAGE_LOCAL\n");
-				gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
 			case BGP4MP_MESSAGE_AS4_LOCAL: {
 				printf("Unhandled BGP4MP_MESSAGE_AS4_LOCAL\n");
-				gzseek(file, header.length, SEEK_CUR);
 				break;
 			}
 			default: {
 				if (debug) {
 					printf("Unhandled BGP4MP subtype %u\n", header.subtype);
 				}
-				gzseek(file, header.length, SEEK_CUR);
 			}
 			}
 			break;
@@ -628,13 +659,19 @@ int main(int argc, char *argv[])
 			}
 		}
 		}
+
+		cur       += header.length;
+		remaining -= header.length;
 	}
+
 	if (peer_index != NULL) {
 		free(peer_index);
-		peer_index = NULL;
 	}
-	gzclose(file);
+	if (bufs.aspath            != NULL) free(bufs.aspath);
+	if (bufs.communities       != NULL) free(bufs.communities);
+	if (bufs.large_communities != NULL) free(bufs.large_communities);
+
+	free(data);
 
 	return EXIT_SUCCESS;
 }
-

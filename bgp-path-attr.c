@@ -115,7 +115,7 @@ int parse_bgp_path_attr_mp_reach_nlri(char *buffer, int buffer_len, uint8_t *inp
 }
 
 
-int parse_bgp_path_attr_community(char **buffer_ptr, int buffer_size, uint8_t *input, int input_size, bool as_hex)
+int parse_bgp_path_attr_community(char **buffer_ptr, int *buffer_cap, uint8_t *input, int input_size, bool as_hex)
 {
 	if (input_size % 4 != 0) {
 		fprintf(stderr, "Malformed community of length %u\n", input_size);
@@ -124,19 +124,18 @@ int parse_bgp_path_attr_community(char **buffer_ptr, int buffer_size, uint8_t *i
 	char *buffer = *buffer_ptr;
 	int input_idx = 0;
 	int output_idx = 0;
-	int remaining = buffer_size;
+	int remaining = *buffer_cap;
 	int i = 0;
 
 	while (input_idx < input_size) {
 		if (remaining < 16) {
-			char *tmp = (char *)realloc(buffer, buffer_size + 256);
+			char *tmp = (char *)realloc(buffer, *buffer_cap + 256);
 			if (tmp == NULL) {
 				fprintf(stderr, "ERROR: realloc() failed\n");
 			}
 			else {
-				memset(tmp+buffer_size, '\0', 256);
 				remaining += 256;
-				buffer_size += 256;
+				*buffer_cap += 256;
 				buffer = tmp;
 				*buffer_ptr = tmp;
 			}
@@ -173,7 +172,7 @@ int parse_bgp_path_attr_community(char **buffer_ptr, int buffer_size, uint8_t *i
 	return input_size;
 }
 
-int parse_bgp_path_attr_large_community(char **buffer_ptr, int buffer_size, uint8_t *input, int input_size, bool as_hex)
+int parse_bgp_path_attr_large_community(char **buffer_ptr, int *buffer_cap, uint8_t *input, int input_size, bool as_hex)
 {
 	if (input_size % 12 != 0) {
 		fprintf(stderr, "Malformed large community of length %u\n", input_size);
@@ -182,19 +181,18 @@ int parse_bgp_path_attr_large_community(char **buffer_ptr, int buffer_size, uint
 	char *buffer = *buffer_ptr;
 	int input_idx = 0;
 	int output_idx = 0;
-	int remaining = buffer_size;
+	int remaining = *buffer_cap;
 	int i = 0;
 
 	while (input_idx < input_size) {
 		if (remaining < 36) {
-			char *tmp = (char *)realloc(buffer, buffer_size + 256);
+			char *tmp = (char *)realloc(buffer, *buffer_cap + 256);
 			if (tmp == NULL) {
 				fprintf(stderr, "ERROR: realloc() failed\n");
 			}
 			else {
-				memset(tmp+buffer_size, '\0', 256);
 				remaining += 256;
-				buffer_size += 256;
+				*buffer_cap += 256;
 				buffer = tmp;
 				*buffer_ptr = tmp;
 			}
@@ -261,12 +259,12 @@ int parse_bgp_path_attr_nexthop(char *buffer, int remaining, uint8_t *input, int
       |    type == ASPATH_AS_SE[TQ]   |    Count = num ASNs           |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-int parse_bgp_path_attr_aspath(char **buffer_ptr, int buffer_size, uint8_t *input, int len, bool as_hex)
+int parse_bgp_path_attr_aspath(char **buffer_ptr, int *buffer_cap, uint8_t *input, int len, bool as_hex)
 {
 	int idx = 0;
 	char *buffer = *buffer_ptr;
 	int buffer_idx = 0;
-	int remaining  = buffer_size;
+	int remaining  = *buffer_cap;
 
 	while (idx < len) {
 		struct attr_as_path_header header;
@@ -284,14 +282,13 @@ int parse_bgp_path_attr_aspath(char **buffer_ptr, int buffer_size, uint8_t *inpu
 		if (header.type == ASPATH_AS_SET) {
 			while (hop_count < header.count) {
 				if (remaining < 16) {
-					char *tmp = (char *)realloc(buffer, buffer_size + 256);
+					char *tmp = (char *)realloc(buffer, *buffer_cap + 256);
 					if (tmp == NULL) {
 						fprintf(stderr, "ERROR: realloc() failed\n");
 					}
 					else {
-						memset(tmp+buffer_size, '\0', 256);
 						remaining += 256;
-						buffer_size += 256;
+						*buffer_cap += 256;
 						buffer = tmp;
 						*buffer_ptr = tmp;
 					}
@@ -325,14 +322,13 @@ int parse_bgp_path_attr_aspath(char **buffer_ptr, int buffer_size, uint8_t *inpu
 		else if (header.type == ASPATH_AS_SEQ) {
 			while (hop_count < header.count) {
 				if (remaining < 16) {
-					char *tmp = (char *)realloc(buffer, buffer_size + 256);
+					char *tmp = (char *)realloc(buffer, *buffer_cap + 256);
 					if (tmp == NULL) {
 						fprintf(stderr, "ERROR: realloc() failed\n");
 					}
 					else {
-						memset(tmp+buffer_size, '\0', 256);
 						remaining += 256;
-						buffer_size += 256;
+						*buffer_cap += 256;
 						buffer = tmp;
 						*buffer_ptr = tmp;
 					}
