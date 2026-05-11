@@ -48,7 +48,7 @@ int parse_peer_index_table(uint8_t *input, struct peer **peer_index_ptr)
 	 * out */
 	char view_name[header.view_name_length+1];
 	memset(view_name, '\0', sizeof(view_name));
-	strncpy(view_name, input+sizeof(header), header.view_name_length);
+	strncpy(view_name, (char *)(input+sizeof(header)), header.view_name_length);
 
 	uint16_t peer_count;
 	memcpy(&peer_count, input + sizeof(header) + header.view_name_length, 2);
@@ -186,16 +186,11 @@ int parse_bgp_message(uint8_t *input)
 		printf("Withdrawn length: 0x%x bytes\n", htons(*withdrawn_len));
 		int i = 0;
 		while (i < htons(*withdrawn_len)) {
-			uint8_t pfx_len = *(input+index);
-			printf("route len: %x\n", pfx_len);
-
-			// bump up to a byte boundary
-			while (pfx_len % 8) {
-				pfx_len++;
-			}
-
-			i+= pfx_len;
-			index += pfx_len;
+			uint8_t pfx_bits = *(input+index);
+			int pfx_bytes = (pfx_bits + 7) / 8;
+			printf("route len: %x\n", pfx_bits);
+			i     += 1 + pfx_bytes;
+			index += 1 + pfx_bytes;
 		}
 
 		uint16_t *path_attr_len = (uint16_t *)(input+index);
@@ -252,6 +247,7 @@ int parse_bgp_message(uint8_t *input)
 int parse_bgp4mp_message_as4(uint8_t *input, int family)
 {
 	int index = 0;
+	(void)family;
 
 	struct bgp4mp_state_change *header = (struct bgp4mp_state_change *)input;
 
@@ -300,6 +296,7 @@ int parse_bgp4mp_message_as4(uint8_t *input, int family)
 int parse_bgp4mp_state_change(uint8_t *input, int family)
 {
 	int index = 0;
+	(void)family;
 
 	struct bgp4mp_state_change *header = (struct bgp4mp_state_change *)input;
 
@@ -378,8 +375,6 @@ void parse_spec(char *arg, struct spec *spec)
 
 	while (tmp != NULL) {
 
-		printf("looping\n");
-
 		if (!strcmp(tmp, "aspath")) {
 			spec->aspath = true;
 			spec->aspath_hex = false;
@@ -399,13 +394,12 @@ void parse_spec(char *arg, struct spec *spec)
 
 		tmp = strtok(NULL, " ,");
 	}
-
-	printf("spec: %u %u %u %u\n", spec->aspath, spec->aspath_hex, spec->communities, spec->communities_hex);
 }
 
 int main(int argc, char *argv[])
 {
 	signal(SIGINT, interrupt_handler);
+	setvbuf(stdout, NULL, _IOFBF, 1 << 20);
 
 	gzFile file;
 	debug  = false;
@@ -580,7 +574,7 @@ int main(int argc, char *argv[])
 			case BGP4MP_STATE_CHANGE: {
 				uint8_t *input = (uint8_t *)malloc(header.length);
 				gzread(file, input, header.length);
-				uint32_t bytes_parsed = parse_bgp4mp_state_change(input, header.subtype);
+				parse_bgp4mp_state_change(input, header.subtype);
 				free(input);
 				break;
 			}
@@ -592,7 +586,7 @@ int main(int argc, char *argv[])
 			case BGP4MP_MESSAGE_AS4: {
 				uint8_t *input = (uint8_t *)malloc(header.length);
 				gzread(file, input, header.length);
-				uint32_t bytes_parsed = parse_bgp4mp_message_as4(input, header.subtype);
+				parse_bgp4mp_message_as4(input, header.subtype);
 				free(input);
 				break;
 			}
