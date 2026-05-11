@@ -1,0 +1,54 @@
+name: Build Debian Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-deb:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: sudo apt-get install -y gcc libdeflate-dev
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Build
+        run: make CC=gcc CFLAGS="-Wall -Wextra -O3" LDFLAGS="-ldeflate"
+
+      - name: Package
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          PKGDIR=mrt-parser_${VERSION}_${{ matrix.arch }}
+          mkdir -p ${PKGDIR}/usr/bin ${PKGDIR}/DEBIAN
+          cp mrt-parser ${PKGDIR}/usr/bin/
+          cat > ${PKGDIR}/DEBIAN/control <<EOF
+          Package: mrt-parser
+          Version: ${VERSION}
+          Architecture: ${{ matrix.arch }}
+          Maintainer: Stephen Strowes <sdstrowes@gmail.com>
+          Depends: libdeflate0
+          Description: MRT format parser
+           Parses MRT (Multi-threaded Routing Toolkit) format files used to
+           store BGP routing table dumps and update messages.
+          EOF
+          dpkg-deb --build ${PKGDIR}
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.deb"
