@@ -11,8 +11,6 @@
 #include <zlib.h>
 
 #include "mrt.h"
-#include "mrt-parser-types.h"
-#include "bgp-path-attr.h"
 #include "bgp-table-dump.h"
 
 bool debug;
